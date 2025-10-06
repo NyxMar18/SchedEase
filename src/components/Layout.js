@@ -61,7 +61,7 @@ function Layout({ children }) {
     <div>
       <Toolbar>
         <Typography variant="h6" noWrap component="div" sx={{ fontWeight: 'bold' }}>
-          Scheduling System
+          SchedEase
         </Typography>
       </Toolbar>
       <List>
@@ -110,8 +110,8 @@ function Layout({ children }) {
           >
             <MenuIcon />
           </IconButton>
-          <Typography variant="h6" noWrap component="div">
-            School Scheduling System
+          <Typography variant="h4" noWrap component="div">
+           Senior High School Scheduling System
           </Typography>
         </Toolbar>
       </AppBar>

@@ -52,7 +52,7 @@ const AutoSchedule = () => {
   ];
 
   useEffect(() => {
-    fetchData();
+    fetchData(); 
   }, []);
 
   const fetchData = async () => {
