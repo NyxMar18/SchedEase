@@ -36,6 +36,7 @@ import {
 } from '@mui/icons-material';
 import { teacherAPI } from '../services/api';
 import { subjectAPI } from '../firebase/subjectService';
+import { userAPI } from '../services/userService';
 
 const TeacherManagement = () => {
   const [teachers, setTeachers] = useState([]);
@@ -135,8 +136,27 @@ const TeacherManagement = () => {
         await teacherAPI.update(editingTeacher.id, teacherData);
         setSuccess('Teacher updated successfully');
       } else {
-        await teacherAPI.create(teacherData);
-        setSuccess('Teacher created successfully');
+        // Create teacher
+        const result = await teacherAPI.create(teacherData);
+        
+        // Create user account for the teacher
+        if (result.success || result.data) {
+          const teacherId = result.data?.id || result.id;
+          const userAccountData = {
+            ...teacherData,
+            id: teacherId
+          };
+          
+          try {
+            await userAPI.createTeacherAccount(userAccountData);
+            setSuccess('Teacher created successfully with login account');
+          } catch (userError) {
+            console.warn('Teacher created but user account creation failed:', userError);
+            setSuccess('Teacher created successfully (login account creation failed)');
+          }
+        } else {
+          setSuccess('Teacher created successfully');
+        }
       }
 
       handleClose();

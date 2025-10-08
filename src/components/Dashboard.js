@@ -15,6 +15,7 @@ import {
   Schedule as ScheduleIcon,
   TrendingUp as TrendingUpIcon,
 } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 import { classroomAPI, teacherAPI, scheduleAPI } from '../services/api';
 import FirebaseConfigChecker from './FirebaseConfigChecker';
 
@@ -39,6 +40,7 @@ const StatCard = ({ title, value, icon, color = 'primary' }) => (
 );
 
 const Dashboard = () => {
+  const navigate = useNavigate();
   const [stats, setStats] = useState({
     totalClassrooms: 0,
     totalTeachers: 0,
@@ -153,19 +155,31 @@ const Dashboard = () => {
                   label="Add Classroom"
                   color="primary"
                   variant="outlined"
-                  onClick={() => window.location.href = '/classrooms'}
+                  onClick={() => navigate('/classrooms')}
                 />
                 <Chip
                   label="Add Teacher"
                   color="secondary"
                   variant="outlined"
-                  onClick={() => window.location.href = '/teachers'}
+                  onClick={() => navigate('/teachers')}
                 />
                 <Chip
                   label="Generate Schedule"
                   color="success"
                   variant="outlined"
-                  onClick={() => window.location.href = '/generate'}
+                  onClick={() => navigate('/auto-schedule')}
+                />
+                <Chip
+                  label="View Schedules"
+                  color="info"
+                  variant="outlined"
+                  onClick={() => navigate('/schedule-viewer')}
+                />
+                <Chip
+                  label="Teacher Accounts"
+                  color="warning"
+                  variant="outlined"
+                  onClick={() => navigate('/teacher-accounts')}
                 />
               </Box>
             </CardContent>
