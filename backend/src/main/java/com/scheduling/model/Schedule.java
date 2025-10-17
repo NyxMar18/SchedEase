@@ -34,24 +34,36 @@ public class Schedule {
     @JoinColumn(name = "classroom_id", nullable = false)
     private Classroom classroom;
     
-    private String subject;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "section_id", nullable = false)
+    private Section section;
+    
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "subject_id", nullable = false)
+    private Subject subject;
     
     private String notes;
     
     private boolean isRecurring;
+    
+    @Enumerated(EnumType.STRING)
+    private ScheduleStatus status = ScheduleStatus.SCHEDULED;
+    
+    private Integer durationIndex; // For multi-hour subjects (1st hour, 2nd hour, etc.)
     
     // Constructors
     public Schedule() {}
     
     public Schedule(LocalDate date, LocalTime startTime, LocalTime endTime, 
                    DayOfWeek dayOfWeek, Teacher teacher, Classroom classroom, 
-                   String subject, String notes, boolean isRecurring) {
+                   Section section, Subject subject, String notes, boolean isRecurring) {
         this.date = date;
         this.startTime = startTime;
         this.endTime = endTime;
         this.dayOfWeek = dayOfWeek;
         this.teacher = teacher;
         this.classroom = classroom;
+        this.section = section;
         this.subject = subject;
         this.notes = notes;
         this.isRecurring = isRecurring;
@@ -114,11 +126,19 @@ public class Schedule {
         this.classroom = classroom;
     }
     
-    public String getSubject() {
+    public Section getSection() {
+        return section;
+    }
+    
+    public void setSection(Section section) {
+        this.section = section;
+    }
+    
+    public Subject getSubject() {
         return subject;
     }
     
-    public void setSubject(String subject) {
+    public void setSubject(Subject subject) {
         this.subject = subject;
     }
     
@@ -136,5 +156,21 @@ public class Schedule {
     
     public void setRecurring(boolean recurring) {
         isRecurring = recurring;
+    }
+    
+    public ScheduleStatus getStatus() {
+        return status;
+    }
+    
+    public void setStatus(ScheduleStatus status) {
+        this.status = status;
+    }
+    
+    public Integer getDurationIndex() {
+        return durationIndex;
+    }
+    
+    public void setDurationIndex(Integer durationIndex) {
+        this.durationIndex = durationIndex;
     }
 }

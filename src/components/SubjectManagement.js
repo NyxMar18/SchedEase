@@ -126,6 +126,28 @@ const SubjectManagement = () => {
 
   const handleSubmit = async () => {
     try {
+      // Validate required fields
+      if (!formData.name.trim()) {
+        setError('Subject name is required');
+        return;
+      }
+      if (!formData.code.trim()) {
+        setError('Subject code is required');
+        return;
+      }
+      if (!formData.category) {
+        setError('Subject category is required');
+        return;
+      }
+      if (!formData.requiredRoomType) {
+        setError('Required room type is required');
+        return;
+      }
+      if (!formData.durationPerWeek || formData.durationPerWeek <= 0) {
+        setError('Duration per week must be a positive number');
+        return;
+      }
+
       if (editingSubject) {
         await subjectAPI.update(editingSubject.id, formData);
         setSuccess('Subject updated successfully');
@@ -343,10 +365,12 @@ const SubjectManagement = () => {
             </Grid>
             <Grid item xs={12} sm={6}>
               <TextField
+                label="Required Room Type"
                 value={formData.requiredRoomType}
                 onChange={handleChange('requiredRoomType')}
                 fullWidth
                 select
+                required
                 SelectProps={{
                   native: true,
                 }}
@@ -366,6 +390,7 @@ const SubjectManagement = () => {
                 value={formData.durationPerWeek}
                 onChange={handleChange('durationPerWeek')}
                 fullWidth
+                required
                 inputProps={{ min: 1, max: 20 }}
                 placeholder="e.g., 3"
               />

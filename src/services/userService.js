@@ -1,13 +1,21 @@
-// User service for authentication and user management
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, getDocs, updateDoc, doc, query, where } from 'firebase/firestore';
+import { 
+  getFirestore,
+  collection, 
+  addDoc, 
+  getDocs, 
+  query, 
+  where, 
+  doc, 
+  updateDoc,
+  deleteDoc 
+} from 'firebase/firestore';
 import firebaseConfig from '../firebase/config';
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// User operations
 export const userAPI = {
   // Login with email and password
   login: async (email, password) => {
@@ -53,94 +61,104 @@ export const userAPI = {
     }
   },
 
-  // Create user account
-  createUser: async (userData) => {
+  // Create a new user
+  create: async (userData) => {
     try {
       const docRef = await addDoc(collection(db, 'users'), userData);
       return { success: true, id: docRef.id };
     } catch (error) {
-      console.error('Create user error:', error);
-      return { success: false, message: 'Failed to create user' };
+      console.error('Error creating user:', error);
+      return { success: false, message: error.message };
     }
   },
 
-  // Change password
-  changePassword: async (userId, currentPassword, newPassword) => {
+  // Create admin account
+  createAdminAccount: async (adminData) => {
     try {
-      const userRef = doc(db, 'users', userId);
-      const usersRef = collection(db, 'users');
-      const userDoc = await getDocs(query(usersRef, where('__name__', '==', userId)));
+      const adminUserData = {
+        ...adminData,
+        role: 'admin',
+        createdAt: new Date().toISOString()
+      };
       
-      if (userDoc.empty) {
-        return { success: false, message: 'User not found' };
-      }
-
-      const userData = userDoc.docs[0].data();
-
-      // Verify current password
-      if (userData.password !== currentPassword) {
-        return { success: false, message: 'Current password is incorrect' };
-      }
-
-      // Update password
-      await updateDoc(userRef, {
-        password: newPassword,
-        isDefaultPassword: false,
-        lastPasswordChange: new Date().toISOString()
-      });
-
-      return { success: true, message: 'Password changed successfully' };
+      const result = await userAPI.create(adminUserData);
+      return result;
     } catch (error) {
-      console.error('Change password error:', error);
-      return { success: false, message: 'Failed to change password' };
+      console.error('Error creating admin account:', error);
+      return { success: false, message: error.message };
     }
   },
 
-  // Get all users (admin only)
-  getAllUsers: async () => {
+  // Create teacher account
+  createTeacherAccount: async (teacherData) => {
     try {
-      const querySnapshot = await getDocs(collection(db, 'users'));
+      const teacherUserData = {
+        email: teacherData.email,
+        password: '1234', // Default password
+        name: `${teacherData.firstName} ${teacherData.lastName}`,
+        firstName: teacherData.firstName,
+        lastName: teacherData.lastName,
+        role: 'teacher',
+        teacherId: teacherData.id,
+        createdAt: new Date().toISOString()
+      };
+      
+      const result = await userAPI.create(teacherUserData);
+      return result;
+    } catch (error) {
+      console.error('Error creating teacher account:', error);
+      return { success: false, message: error.message };
+    }
+  },
+
+  // Get all users
+  getAll: async () => {
+    try {
+      const usersRef = collection(db, 'users');
+      const querySnapshot = await getDocs(usersRef);
       const users = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
       return { success: true, data: users };
     } catch (error) {
-      console.error('Get users error:', error);
-      return { success: false, message: 'Failed to get users' };
+      console.error('Error getting users:', error);
+      return { success: false, message: error.message };
     }
   },
 
-  // Create teacher account when teacher is added
-  createTeacherAccount: async (teacherData) => {
-    try {
-      const userData = {
-        email: teacherData.email,
-        password: '1234', // Default password
-        role: 'teacher',
-        name: `${teacherData.firstName} ${teacherData.lastName}`,
-        teacherId: teacherData.id,
-        isDefaultPassword: true,
-        createdAt: new Date().toISOString()
-      };
-
-      const result = await userAPI.createUser(userData);
-      return result;
-    } catch (error) {
-      console.error('Create teacher account error:', error);
-      return { success: false, message: 'Failed to create teacher account' };
-    }
-  },
-
-  // Update user profile
-  updateProfile: async (userId, profileData) => {
+  // Update user
+  update: async (userId, userData) => {
     try {
       const userRef = doc(db, 'users', userId);
-      await updateDoc(userRef, profileData);
-      return { success: true, message: 'Profile updated successfully' };
+      await updateDoc(userRef, userData);
+      return { success: true };
     } catch (error) {
-      console.error('Update profile error:', error);
-      return { success: false, message: 'Failed to update profile' };
+      console.error('Error updating user:', error);
+      return { success: false, message: error.message };
+    }
+  },
+
+  // Change password
+  changePassword: async (userId, newPassword) => {
+    try {
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, { password: newPassword });
+      return { success: true };
+    } catch (error) {
+      console.error('Error changing password:', error);
+      return { success: false, message: error.message };
+    }
+  },
+
+  // Delete user
+  delete: async (userId) => {
+    try {
+      await deleteDoc(doc(db, 'users', userId));
+      return { success: true };
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      return { success: false, message: error.message };
     }
   }
 };

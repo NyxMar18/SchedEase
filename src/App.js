@@ -14,6 +14,7 @@ import ScheduleViewer from './components/ScheduleViewer';
 import FirebaseTest from './components/FirebaseTest';
 import Login from './components/Login';
 import Unauthorized from './components/Unauthorized';
+import AdminAccountRecovery from './components/AdminAccountRecovery';
 import ProtectedRoute from './components/ProtectedRoutes';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
@@ -39,6 +40,7 @@ const AppRoutes = () => {
       {/* Public Routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/unauthorized" element={<Unauthorized />} />
+      <Route path="/admin-recovery" element={<AdminAccountRecovery />} />
       
       {/* Protected Routes */}
       <Route path="/" element={

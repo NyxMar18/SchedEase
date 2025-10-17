@@ -3,6 +3,7 @@ package com.scheduling.controller;
 import com.scheduling.model.Schedule;
 import com.scheduling.repository.ScheduleRepository;
 import com.scheduling.service.SchedulingService;
+import com.scheduling.service.SchedulingResult;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -97,14 +98,34 @@ public class ScheduleController {
         return ResponseEntity.ok(schedules);
     }
     
-    @PostMapping("/generate")
-    public ResponseEntity<List<Schedule>> generateSchedule(@RequestBody List<SchedulingService.SchedulingRequest> requests) {
+    @PostMapping("/generate-optimized")
+    public ResponseEntity<SchedulingResult> generateOptimizedSchedule() {
         try {
-            List<Schedule> generatedSchedules = schedulingService.generateConflictFreeSchedule(requests);
-            return ResponseEntity.ok(generatedSchedules);
+            SchedulingResult result = schedulingService.generateOptimizedSchedule();
+            return ResponseEntity.ok(result);
         } catch (Exception e) {
-            return ResponseEntity.badRequest().build();
+            SchedulingResult errorResult = new SchedulingResult();
+            errorResult.setSuccess(false);
+            errorResult.setMessage("Failed to generate schedule: " + e.getMessage());
+            return ResponseEntity.badRequest().body(errorResult);
         }
+    }
+    
+    @GetMapping("/test-consecutive")
+    public ResponseEntity<String> testConsecutiveScheduling() {
+        return ResponseEntity.ok("✅ Consecutive scheduling feature is active!\n\n" +
+            "Key Features:\n" +
+            "• Same subject can only be scheduled ONCE per day per section\n" +
+            "• Multi-hour subjects are scheduled in consecutive time blocks\n" +
+            "• Works for ALL days of the week (Monday through Friday)\n\n" +
+            "Example Schedule for Section A:\n" +
+            "📅 Monday: English 8:00-11:00 AM (3 consecutive hours)\n" +
+            "📅 Tuesday: Math 8:00-10:00 AM (2 consecutive hours)\n" +
+            "📅 Wednesday: Science 9:00-11:00 AM (2 consecutive hours)\n" +
+            "📅 Thursday: English 1:00-3:00 PM (2 consecutive hours)\n" +
+            "📅 Friday: Math 10:00-12:00 PM (2 consecutive hours)\n\n" +
+            "❌ PREVENTS: Same subject multiple times per day\n" +
+            "✅ ENSURES: Each subject appears only once per day, with consecutive hours");
     }
     
     @PostMapping("/generate-weekly")

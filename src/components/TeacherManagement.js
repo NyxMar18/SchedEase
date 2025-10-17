@@ -127,6 +127,36 @@ const TeacherManagement = () => {
 
   const handleSubmit = async () => {
     try {
+      // Validate required fields
+      if (!formData.firstName.trim()) {
+        setError('First name is required');
+        return;
+      }
+      if (!formData.lastName.trim()) {
+        setError('Last name is required');
+        return;
+      }
+      if (!formData.email.trim()) {
+        setError('Email is required');
+        return;
+      }
+      if (!formData.subject) {
+        setError('Subject is required');
+        return;
+      }
+      if (!formData.availableStartTime.trim()) {
+        setError('Available start time is required');
+        return;
+      }
+      if (!formData.availableEndTime.trim()) {
+        setError('Available end time is required');
+        return;
+      }
+      if (formData.availableDays.length === 0) {
+        setError('At least one available day is required');
+        return;
+      }
+
       const teacherData = {
         ...formData,
         availableDays: formData.availableDays.map(day => day.toUpperCase()),
@@ -329,7 +359,7 @@ const TeacherManagement = () => {
               </Grid>
               <Grid item xs={12}>
                 <Typography variant="subtitle2" gutterBottom>
-                  Available Days
+                  Available Days *
                 </Typography>
                 <FormGroup row>
                   {daysOfWeek.map((day) => (
@@ -345,6 +375,11 @@ const TeacherManagement = () => {
                     />
                   ))}
                 </FormGroup>
+                {formData.availableDays.length === 0 && (
+                  <Typography variant="caption" color="error">
+                    Please select at least one available day
+                  </Typography>
+                )}
               </Grid>
               <Grid item xs={12} sm={6}>
               

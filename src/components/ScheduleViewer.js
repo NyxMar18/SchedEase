@@ -36,10 +36,7 @@ import {
 } from '@mui/icons-material';
 import { scheduleAPI, classroomAPI, teacherAPI } from '../services/api';
 import { sectionFirestoreAPI } from '../firebase/sectionFirestoreService';
-import { useAuth } from '../contexts/AuthContext';
-
 const ScheduleViewer = () => {
-  const { user, isTeacher } = useAuth();
   const [schedules, setSchedules] = useState([]);
   const [filteredSchedules, setFilteredSchedules] = useState([]);
   const [classrooms, setClassrooms] = useState([]);
@@ -49,9 +46,9 @@ const ScheduleViewer = () => {
   const [error, setError] = useState(null);
 
   // Filter states
-  const [filterType, setFilterType] = useState(isTeacher() ? 'teacher' : 'all'); // 'all', 'classroom', 'teacher', 'section'
+  const [filterType, setFilterType] = useState('all'); // 'all', 'classroom', 'teacher', 'section'
   const [selectedClassroom, setSelectedClassroom] = useState('');
-  const [selectedTeacher, setSelectedTeacher] = useState(isTeacher() ? user?.email : '');
+  const [selectedTeacher, setSelectedTeacher] = useState('');
   const [selectedSection, setSelectedSection] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState('table'); // 'table', 'weekly'
@@ -73,21 +70,6 @@ const ScheduleViewer = () => {
         setTeachers(teachersRes.data);
         setSections(sectionsRes.data);
         setError(null);
-        
-        // Debug logging
-        console.log('📊 ScheduleViewer data loaded:', {
-          totalSchedules: schedulesRes.data.length,
-          totalTeachers: teachersRes.data.length,
-          currentUser: user,
-          isTeacher: isTeacher(),
-          selectedTeacher: isTeacher() ? user?.email : ''
-        });
-        
-        if (isTeacher()) {
-          console.log('👤 Teacher schedules:', schedulesRes.data.filter(s => 
-            s.teacher?.email === user?.email
-          ));
-        }
       } catch (err) {
         console.error('Error fetching data:', err);
         setError('Failed to load schedule data');
@@ -99,13 +81,6 @@ const ScheduleViewer = () => {
     fetchData();
   }, []);
 
-  // Update selectedTeacher when user changes
-  useEffect(() => {
-    if (isTeacher() && user?.email) {
-      setSelectedTeacher(user.email);
-      console.log('🔄 Updated selectedTeacher to:', user.email);
-    }
-  }, [user, isTeacher]);
 
   // Apply filters
   useEffect(() => {
@@ -136,27 +111,30 @@ const ScheduleViewer = () => {
     if (filterType === 'classroom' && selectedClassroom) {
       filtered = filtered.filter(schedule => schedule.classroom?.id === selectedClassroom);
     } else if (filterType === 'teacher' && selectedTeacher) {
-      // Filter by teacher email for better matching
+      const selectedTeacherData = teachers.find(t => t.id === selectedTeacher);
+      console.log('🔍 Filtering by teacher:', selectedTeacherData);
+      console.log('📚 Teacher subject:', selectedTeacherData?.subject);
+      
       filtered = filtered.filter(schedule => {
-        const teacherEmail = schedule.teacher?.email || '';
-        console.log('🔍 Teacher filter check:', {
-          scheduleTeacherEmail: teacherEmail,
-          selectedTeacherEmail: selectedTeacher,
-          match: teacherEmail === selectedTeacher
-        });
-        return teacherEmail === selectedTeacher;
+        const matchesTeacher = schedule.teacher?.id === selectedTeacher;
+        const scheduleSubject = schedule.subject;
+        
+        console.log(`📋 Schedule: ${scheduleSubject} | Teacher: ${selectedTeacherData?.subject} | Matches: ${matchesTeacher}`);
+        
+        // Additional check: ensure the teacher actually teaches this subject
+        const teacherTeachesSubject = scheduleSubject === selectedTeacherData?.subject;
+        
+        if (matchesTeacher && !teacherTeachesSubject) {
+          console.warn(`⚠️ WARNING: Teacher ${selectedTeacherData?.firstName} ${selectedTeacherData?.lastName} is assigned to teach ${scheduleSubject} but their subject is ${selectedTeacherData?.subject}`);
+          // Don't show this schedule if teacher doesn't actually teach this subject
+          return false;
+        }
+        
+        return matchesTeacher && teacherTeachesSubject;
       });
     } else if (filterType === 'section' && selectedSection) {
       filtered = filtered.filter(schedule => schedule.section?.id === selectedSection);
     }
-
-    console.log('🔍 Filter results:', {
-      originalCount: schedules.length,
-      filteredCount: filtered.length,
-      filterType,
-      selectedTeacher,
-      isTeacher: isTeacher()
-    });
 
     setFilteredSchedules(filtered);
   }, [schedules, filterType, selectedClassroom, selectedTeacher, selectedSection, searchTerm]);
@@ -288,14 +266,10 @@ const ScheduleViewer = () => {
       </Box>
 
       <Typography variant="subtitle1" color="textSecondary" gutterBottom>
-        {isTeacher() 
-          ? `View your personal schedule - ${user?.name}` 
-          : 'View and filter schedules by classroom, teacher, or section'
-        }
+        View and filter schedules by classroom, teacher, or section
       </Typography>
 
-      {/* Filters - Only show for admin */}
-      {!isTeacher() && (
+      {/* Filters */}
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>
@@ -391,63 +365,36 @@ const ScheduleViewer = () => {
           </Grid>
         </CardContent>
       </Card>
-      )}
 
-      {/* Teacher Schedule Summary */}
-      {filterType === 'teacher' && selectedTeacher && filteredSchedules.length > 0 && (
-        <Card sx={{ mb: 3, bgcolor: 'primary.light', color: 'primary.contrastText' }}>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>
-              📅 Teacher Schedule Summary
-            </Typography>
-            {(() => {
-              const selectedTeacherData = teachers.find(t => t.id === selectedTeacher);
-              const teacherSchedules = filteredSchedules;
-              const subjects = [...new Set(teacherSchedules.map(s => s.subject))];
-              const classrooms = [...new Set(teacherSchedules.map(s => s.classroom?.roomName))];
-              const sections = [...new Set(teacherSchedules.map(s => s.section?.sectionName || s.section?.name))];
-              
-              return (
-                <Grid container spacing={2}>
-                  <Grid item xs={12} md={6}>
-                    <Typography variant="subtitle1" gutterBottom>
-                      <strong>Teacher:</strong> {selectedTeacherData?.firstName} {selectedTeacherData?.lastName}
-                    </Typography>
-                    <Typography variant="body2" gutterBottom>
-                      <strong>Subject Expertise:</strong> {selectedTeacherData?.subject}
-                    </Typography>
-                    <Typography variant="body2" gutterBottom>
-                      <strong>Total Classes:</strong> {teacherSchedules.length}
-                    </Typography>
-                  </Grid>
-                  <Grid item xs={12} md={6}>
-                    <Typography variant="body2" gutterBottom>
-                      <strong>Subjects Teaching:</strong> {subjects.join(', ')}
-                    </Typography>
-                    <Typography variant="body2" gutterBottom>
-                      <strong>Classrooms Used:</strong> {classrooms.join(', ')}
-                    </Typography>
-                    <Typography variant="body2" gutterBottom>
-                      <strong>Sections Assigned:</strong> {sections.join(', ')}
-                    </Typography>
-                  </Grid>
-                </Grid>
-              );
-            })()}
-          </CardContent>
-        </Card>
-      )}
 
       {/* Results Summary */}
       <Box mb={2}>
         <Typography variant="h6">
           Showing {filteredSchedules.length} of {schedules.length} schedules
-          {filterType === 'teacher' && selectedTeacher && (
-            <Typography variant="body2" color="textSecondary" component="span">
-              {' '}for selected teacher
-            </Typography>
-          )}
         </Typography>
+        
+        {/* Subject Mismatch Warning */}
+        {filterType === 'teacher' && selectedTeacher && (() => {
+          const selectedTeacherData = teachers.find(t => t.id === selectedTeacher);
+          const mismatchedSchedules = filteredSchedules.filter(schedule => 
+            schedule.subject !== selectedTeacherData?.subject
+          );
+          
+          if (mismatchedSchedules.length > 0) {
+            return (
+              <Alert severity="warning" sx={{ mt: 2 }}>
+                <Typography variant="body2">
+                  ⚠️ <strong>Warning:</strong> Found {mismatchedSchedules.length} schedule(s) where the teacher is assigned to teach subjects they don't specialize in.
+                  <br />
+                  Teacher specializes in: <strong>{selectedTeacherData?.subject}</strong>
+                  <br />
+                  Assigned subjects: <strong>{[...new Set(mismatchedSchedules.map(s => s.subject))].join(', ')}</strong>
+                </Typography>
+              </Alert>
+            );
+          }
+          return null;
+        })()}
       </Box>
 
       {/* Schedules Display */}
@@ -488,9 +435,22 @@ const ScheduleViewer = () => {
                     </Typography>
                   </TableCell>
                   <TableCell>
-                    <Typography variant="body2" fontWeight="medium">
-                      {schedule.subject || 'N/A'}
-                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography variant="body2" fontWeight="medium">
+                        {schedule.subject || 'N/A'}
+                      </Typography>
+                      {schedule.teacher && schedule.subject !== schedule.teacher.subject && (
+                        <Tooltip title={`⚠️ Warning: Teacher's subject is "${schedule.teacher.subject}" but assigned to teach "${schedule.subject}"`}>
+                          <Chip 
+                            label="⚠️" 
+                            size="small" 
+                            color="warning" 
+                            variant="outlined"
+                            sx={{ minWidth: 'auto', height: '20px' }}
+                          />
+                        </Tooltip>
+                      )}
+                    </Box>
                   </TableCell>
                   <TableCell>
                       <Typography variant="body2" fontWeight="medium">

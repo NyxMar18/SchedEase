@@ -347,7 +347,7 @@ const TeacherAccountManager = () => {
                       />
                     </Grid>
                     <Grid item xs={12}>
-                      <FormControl fullWidth>
+                      <FormControl fullWidth required>
                         <InputLabel>Subject</InputLabel>
                         <Select
                           value={newTeacher.subject}
@@ -370,6 +370,7 @@ const TeacherAccountManager = () => {
                         value={newTeacher.availableStartTime}
                         onChange={(e) => setNewTeacher({...newTeacher, availableStartTime: e.target.value})}
                         InputLabelProps={{ shrink: true }}
+                        required
                       />
                     </Grid>
                     <Grid item xs={12} sm={6}>
@@ -380,6 +381,7 @@ const TeacherAccountManager = () => {
                         value={newTeacher.availableEndTime}
                         onChange={(e) => setNewTeacher({...newTeacher, availableEndTime: e.target.value})}
                         InputLabelProps={{ shrink: true }}
+                        required
                       />
                     </Grid>
                     <Grid item xs={12}>

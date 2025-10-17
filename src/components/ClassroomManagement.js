@@ -108,6 +108,28 @@ const ClassroomManagement = () => {
 
   const handleSubmit = async () => {
     try {
+      // Validate required fields
+      if (!formData.roomName.trim()) {
+        setError('Room name is required');
+        return;
+      }
+      if (!formData.roomCode.trim()) {
+        setError('Room code is required');
+        return;
+      }
+      if (!formData.roomType) {
+        setError('Room type is required');
+        return;
+      }
+      if (!formData.capacity || formData.capacity <= 0) {
+        setError('Capacity must be a positive number');
+        return;
+      }
+      if (!formData.location.trim()) {
+        setError('Location is required');
+        return;
+      }
+
       const classroomData = {
         ...formData,
         capacity: parseInt(formData.capacity),
@@ -263,6 +285,7 @@ const ClassroomManagement = () => {
                 value={formData.location}
                 onChange={handleChange('location')}
                 fullWidth
+                required
               />
             </Grid>
             <Grid item xs={12}>
