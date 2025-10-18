@@ -24,6 +24,14 @@ import {
   InputAdornment,
   IconButton,
   Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Snackbar,
+  FormGroup,
+  FormControlLabel,
+  Checkbox,
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -33,10 +41,27 @@ import {
   Refresh as RefreshIcon,
   TableChart as TableChartIcon,
   CalendarViewWeek as CalendarViewWeekIcon,
+  Edit as EditIcon,
+  Save as SaveIcon,
+  Cancel as CancelIcon,
+  Warning as WarningIcon,
+  Add as AddIcon,
+  Delete as DeleteIcon,
 } from '@mui/icons-material';
 import { scheduleAPI, classroomAPI, teacherAPI } from '../services/api';
 import { sectionFirestoreAPI } from '../firebase/sectionFirestoreService';
+import { useAuth } from '../contexts/AuthContext';
+
 const ScheduleViewer = () => {
+  const { user, isAdmin, isTeacher } = useAuth();
+  
+  // Debug logging
+  console.log('🔍 ScheduleViewer Debug:', {
+    user: user,
+    userRole: user?.role,
+    isAdmin: isAdmin(),
+    isTeacher: isTeacher()
+  });
   const [schedules, setSchedules] = useState([]);
   const [filteredSchedules, setFilteredSchedules] = useState([]);
   const [classrooms, setClassrooms] = useState([]);
@@ -53,22 +78,91 @@ const ScheduleViewer = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState('table'); // 'table', 'weekly'
 
+  // Edit states
+  const [editingSchedule, setEditingSchedule] = useState(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editFormData, setEditFormData] = useState({
+    startTime: '',
+    endTime: '',
+    dayOfWeek: '',
+    teacher: '',
+    classroom: '',
+    subject: '',
+    notes: ''
+  });
+  const [conflicts, setConflicts] = useState([]);
+  const [showConflictWarning, setShowConflictWarning] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [showSuccessSnackbar, setShowSuccessSnackbar] = useState(false);
+
+  // Add/Delete states
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addFormData, setAddFormData] = useState({
+    date: '',
+    startTime: '',
+    endTime: '',
+    dayOfWeek: '',
+    teacher: '',
+    classroom: '',
+    section: '',
+    subject: '',
+    notes: '',
+    isRecurring: false
+  });
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [scheduleToDelete, setScheduleToDelete] = useState(null);
+
+  // Drag and Drop states
+  const [draggedSchedule, setDraggedSchedule] = useState(null);
+  const [dragOverSlot, setDragOverSlot] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+
   // Load all data
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [schedulesRes, classroomsRes, teachersRes, sectionsRes] = await Promise.all([
-          scheduleAPI.getAll(),
-          classroomAPI.getAll(),
-          teacherAPI.getAll(),
-          sectionFirestoreAPI.getAll(),
-        ]);
-
-        setSchedules(schedulesRes.data);
-        setClassrooms(classroomsRes.data);
-        setTeachers(teachersRes.data);
-        setSections(sectionsRes.data);
+        
+        // Fetch schedules
+        const schedulesRes = await scheduleAPI.getAll();
+        let allSchedules = schedulesRes.data;
+        
+        // If user is a teacher, filter schedules to only show their own
+        if (isTeacher() && user?.teacherId) {
+          allSchedules = allSchedules.filter(schedule => {
+            // Check if the schedule's teacher ID matches the logged-in teacher's ID
+            return schedule.teacher?.id === user.teacherId;
+          });
+          console.log(`👨‍🏫 Teacher ${user.name} (ID: ${user.teacherId}) - Filtered to ${allSchedules.length} schedules`);
+        }
+        
+        setSchedules(allSchedules);
+        
+        // For teachers, we don't need to load all classrooms, teachers, and sections
+        // since they can only see their own schedules
+        if (isAdmin()) {
+          const [classroomsRes, teachersRes, sectionsRes] = await Promise.all([
+            classroomAPI.getAll(),
+            teacherAPI.getAll(),
+            sectionFirestoreAPI.getAll(),
+          ]);
+          
+          setClassrooms(classroomsRes.data);
+          setTeachers(teachersRes.data);
+          setSections(sectionsRes.data);
+        } else {
+          // For teachers, we still need some data for display purposes
+          const [classroomsRes, teachersRes, sectionsRes] = await Promise.all([
+            classroomAPI.getAll(),
+            teacherAPI.getAll(),
+            sectionFirestoreAPI.getAll(),
+          ]);
+          
+          setClassrooms(classroomsRes.data);
+          setTeachers(teachersRes.data);
+          setSections(sectionsRes.data);
+        }
+        
         setError(null);
       } catch (err) {
         console.error('Error fetching data:', err);
@@ -78,8 +172,10 @@ const ScheduleViewer = () => {
       }
     };
 
-    fetchData();
-  }, []);
+    if (user) {
+      fetchData();
+    }
+  }, [user, isTeacher, isAdmin]);
 
 
   // Apply filters
@@ -188,6 +284,440 @@ const ScheduleViewer = () => {
     window.print();
   };
 
+  // Conflict detection function
+  const detectConflicts = (scheduleId, newData) => {
+    const detectedConflicts = [];
+    
+    // Check for teacher conflicts
+    const teacherConflicts = schedules.filter(schedule => 
+      schedule.id !== scheduleId &&
+      schedule.teacher?.id === newData.teacher &&
+      schedule.dayOfWeek === newData.dayOfWeek &&
+      timeOverlaps(schedule.startTime, schedule.endTime, newData.startTime, newData.endTime)
+    );
+    
+    // Check for classroom conflicts
+    const classroomConflicts = schedules.filter(schedule => 
+      schedule.id !== scheduleId &&
+      schedule.classroom?.id === newData.classroom &&
+      schedule.dayOfWeek === newData.dayOfWeek &&
+      timeOverlaps(schedule.startTime, schedule.endTime, newData.startTime, newData.endTime)
+    );
+
+    teacherConflicts.forEach(conflict => {
+      detectedConflicts.push({
+        type: 'teacher',
+        message: `Teacher ${conflict.teacher?.firstName} ${conflict.teacher?.lastName} is already scheduled for ${conflict.subject} at ${conflict.startTime}-${conflict.endTime}`,
+        conflictingSchedule: conflict
+      });
+    });
+
+    classroomConflicts.forEach(conflict => {
+      detectedConflicts.push({
+        type: 'classroom',
+        message: `Classroom ${conflict.classroom?.roomName} is already booked for ${conflict.subject} at ${conflict.startTime}-${conflict.endTime}`,
+        conflictingSchedule: conflict
+      });
+    });
+
+    return detectedConflicts;
+  };
+
+  // Helper function to check time overlaps
+  const timeOverlaps = (start1, end1, start2, end2) => {
+    const start1Time = new Date(`2000-01-01 ${start1}`);
+    const end1Time = new Date(`2000-01-01 ${end1}`);
+    const start2Time = new Date(`2000-01-01 ${start2}`);
+    const end2Time = new Date(`2000-01-01 ${end2}`);
+
+    return start1Time < end2Time && start2Time < end1Time;
+  };
+
+  // Handle edit button click
+  const handleEditSchedule = (schedule) => {
+    setEditingSchedule(schedule);
+    setEditFormData({
+      startTime: schedule.startTime || '',
+      endTime: schedule.endTime || '',
+      dayOfWeek: schedule.dayOfWeek || '',
+      teacher: schedule.teacher?.id || '',
+      classroom: schedule.classroom?.id || '',
+      subject: schedule.subject || '',
+      notes: schedule.notes || ''
+    });
+    setConflicts([]);
+    setShowConflictWarning(false);
+    setEditDialogOpen(true);
+  };
+
+  // Handle form data changes
+  const handleEditFormChange = (field) => (event) => {
+    const newValue = event.target.value;
+    setEditFormData(prev => ({
+      ...prev,
+      [field]: newValue
+    }));
+
+    // Check for conflicts when time or day changes
+    if (['startTime', 'endTime', 'dayOfWeek', 'teacher', 'classroom'].includes(field)) {
+      const newData = { ...editFormData, [field]: newValue };
+      if (newData.startTime && newData.endTime && newData.dayOfWeek && newData.teacher && newData.classroom) {
+        const detectedConflicts = detectConflicts(editingSchedule?.id, newData);
+        setConflicts(detectedConflicts);
+        setShowConflictWarning(detectedConflicts.length > 0);
+      }
+    }
+  };
+
+  // Handle save schedule
+  const handleSaveSchedule = async () => {
+    try {
+      setLoading(true);
+      
+      // Final conflict check
+      const finalConflicts = detectConflicts(editingSchedule?.id, editFormData);
+      
+      if (finalConflicts.length > 0) {
+        setConflicts(finalConflicts);
+        setShowConflictWarning(true);
+        return;
+      }
+
+      // Prepare update data
+      const selectedTeacher = teachers.find(t => t.id === editFormData.teacher);
+      const selectedClassroom = classrooms.find(c => c.id === editFormData.classroom);
+      
+      const updateData = {
+        startTime: editFormData.startTime,
+        endTime: editFormData.endTime,
+        dayOfWeek: editFormData.dayOfWeek,
+        teacher: selectedTeacher,
+        classroom: selectedClassroom,
+        subject: editFormData.subject,
+        notes: editFormData.notes,
+        // Keep original values for fields not being edited
+        date: editingSchedule.date,
+        section: editingSchedule.section,
+        isRecurring: editingSchedule.isRecurring,
+        status: editingSchedule.status
+      };
+
+      await scheduleAPI.update(editingSchedule.id, updateData);
+      
+      // Refresh schedules
+      const schedulesRes = await scheduleAPI.getAll();
+      let allSchedules = schedulesRes.data;
+      
+      if (isTeacher() && user?.teacherId) {
+        allSchedules = allSchedules.filter(schedule => {
+          return schedule.teacher?.id === user.teacherId;
+        });
+      }
+      
+      setSchedules(allSchedules);
+      setEditDialogOpen(false);
+      setSuccessMessage('Schedule updated successfully!');
+      setShowSuccessSnackbar(true);
+      
+    } catch (err) {
+      setError('Failed to update schedule');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle cancel edit
+  const handleCancelEdit = () => {
+    setEditDialogOpen(false);
+    setEditingSchedule(null);
+    setEditFormData({
+      startTime: '',
+      endTime: '',
+      dayOfWeek: '',
+      teacher: '',
+      classroom: '',
+      subject: '',
+      notes: ''
+    });
+    setConflicts([]);
+    setShowConflictWarning(false);
+  };
+
+  // Handle add schedule
+  const handleAddSchedule = () => {
+    setAddFormData({
+      date: new Date().toISOString().split('T')[0], // Today's date
+      startTime: '',
+      endTime: '',
+      dayOfWeek: '',
+      teacher: '',
+      classroom: '',
+      section: '',
+      subject: '',
+      notes: '',
+      isRecurring: false
+    });
+    setAddDialogOpen(true);
+  };
+
+  // Handle add form changes
+  const handleAddFormChange = (field) => (event) => {
+    const newValue = event.target.type === 'checkbox' ? event.target.checked : event.target.value;
+    setAddFormData(prev => ({
+      ...prev,
+      [field]: newValue
+    }));
+
+    // Auto-set day of week when date changes
+    if (field === 'date' && newValue) {
+      const date = new Date(newValue);
+      const days = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+      setAddFormData(prev => ({
+        ...prev,
+        dayOfWeek: days[date.getDay()]
+      }));
+    }
+  };
+
+  // Handle save new schedule
+  const handleSaveNewSchedule = async () => {
+    try {
+      setLoading(true);
+      
+      // Prepare schedule data
+      const selectedTeacher = teachers.find(t => t.id === addFormData.teacher);
+      const selectedClassroom = classrooms.find(c => c.id === addFormData.classroom);
+      const selectedSection = sections.find(s => s.id === addFormData.section);
+      
+      const scheduleData = {
+        date: addFormData.date,
+        startTime: addFormData.startTime,
+        endTime: addFormData.endTime,
+        dayOfWeek: addFormData.dayOfWeek,
+        teacher: selectedTeacher,
+        classroom: selectedClassroom,
+        section: selectedSection,
+        subject: addFormData.subject,
+        notes: addFormData.notes,
+        isRecurring: addFormData.isRecurring,
+        status: 'scheduled'
+      };
+
+      await scheduleAPI.create(scheduleData);
+      
+      // Refresh schedules
+      const schedulesRes = await scheduleAPI.getAll();
+      let allSchedules = schedulesRes.data;
+      
+      if (isTeacher() && user?.teacherId) {
+        allSchedules = allSchedules.filter(schedule => {
+          return schedule.teacher?.id === user.teacherId;
+        });
+      }
+      
+      setSchedules(allSchedules);
+      setAddDialogOpen(false);
+      setSuccessMessage('Schedule created successfully!');
+      setShowSuccessSnackbar(true);
+      
+    } catch (err) {
+      setError('Failed to create schedule');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle cancel add
+  const handleCancelAdd = () => {
+    setAddDialogOpen(false);
+    setAddFormData({
+      date: '',
+      startTime: '',
+      endTime: '',
+      dayOfWeek: '',
+      teacher: '',
+      classroom: '',
+      section: '',
+      subject: '',
+      notes: '',
+      isRecurring: false
+    });
+  };
+
+  // Handle delete schedule
+  const handleDeleteSchedule = (schedule) => {
+    setScheduleToDelete(schedule);
+    setDeleteDialogOpen(true);
+  };
+
+  // Handle confirm delete
+  const handleConfirmDelete = async () => {
+    try {
+      setLoading(true);
+      
+      await scheduleAPI.delete(scheduleToDelete.id);
+      
+      // Refresh schedules
+      const schedulesRes = await scheduleAPI.getAll();
+      let allSchedules = schedulesRes.data;
+      
+      if (isTeacher() && user?.teacherId) {
+        allSchedules = allSchedules.filter(schedule => {
+          return schedule.teacher?.id === user.teacherId;
+        });
+      }
+      
+      setSchedules(allSchedules);
+      setDeleteDialogOpen(false);
+      setScheduleToDelete(null);
+      setSuccessMessage('Schedule deleted successfully!');
+      setShowSuccessSnackbar(true);
+      
+    } catch (err) {
+      setError('Failed to delete schedule');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle cancel delete
+  const handleCancelDelete = () => {
+    setDeleteDialogOpen(false);
+    setScheduleToDelete(null);
+  };
+
+  // Drag and Drop handlers
+  const handleDragStart = (e, schedule) => {
+    setDraggedSchedule(schedule);
+    setIsDragging(true);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', e.target.outerHTML);
+  };
+
+  const handleDragOver = (e, day, timeSlot) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverSlot({ day, timeSlot });
+  };
+
+  const handleDragLeave = (e) => {
+    setDragOverSlot(null);
+  };
+
+  const handleDrop = async (e, targetDay, targetTimeSlot) => {
+    e.preventDefault();
+    
+    if (!draggedSchedule || !isAdmin()) {
+      setDraggedSchedule(null);
+      setDragOverSlot(null);
+      setIsDragging(false);
+      return;
+    }
+
+    // Check if the target slot is the same as the current slot
+    if (draggedSchedule.dayOfWeek === targetDay && 
+        draggedSchedule.startTime === targetTimeSlot.start &&
+        draggedSchedule.endTime === targetTimeSlot.end) {
+      setDraggedSchedule(null);
+      setDragOverSlot(null);
+      setIsDragging(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      // Check for conflicts in the target slot
+      const conflicts = detectConflictsForSlot(targetDay, targetTimeSlot, draggedSchedule);
+      
+      if (conflicts.length > 0) {
+        setError(`Cannot move schedule: ${conflicts.map(c => c.message).join(', ')}`);
+        setDraggedSchedule(null);
+        setDragOverSlot(null);
+        setIsDragging(false);
+        return;
+      }
+
+      // Update the schedule
+      const updatedSchedule = {
+        ...draggedSchedule,
+        dayOfWeek: targetDay,
+        startTime: targetTimeSlot.start,
+        endTime: targetTimeSlot.end,
+        notes: draggedSchedule.notes ? 
+          `${draggedSchedule.notes} (Moved via drag & drop)` : 
+          'Moved via drag & drop'
+      };
+
+      await scheduleAPI.update(draggedSchedule.id, updatedSchedule);
+      
+      // Refresh schedules
+      const schedulesRes = await scheduleAPI.getAll();
+      let allSchedules = schedulesRes.data;
+      
+      if (isTeacher() && user?.teacherId) {
+        allSchedules = allSchedules.filter(schedule => {
+          return schedule.teacher?.id === user.teacherId;
+        });
+      }
+      
+      setSchedules(allSchedules);
+      setSuccessMessage('Schedule moved successfully!');
+      setShowSuccessSnackbar(true);
+      
+    } catch (err) {
+      setError('Failed to move schedule');
+    } finally {
+      setDraggedSchedule(null);
+      setDragOverSlot(null);
+      setIsDragging(false);
+      setLoading(false);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggedSchedule(null);
+    setDragOverSlot(null);
+    setIsDragging(false);
+  };
+
+  // Helper function to detect conflicts for a specific slot
+  const detectConflictsForSlot = (day, timeSlot, scheduleToMove) => {
+    const conflicts = [];
+    
+    // Check for teacher conflicts
+    const teacherConflicts = filteredSchedules.filter(schedule => 
+      schedule.id !== scheduleToMove.id &&
+      schedule.dayOfWeek === day &&
+      schedule.startTime === timeSlot.start &&
+      schedule.endTime === timeSlot.end &&
+      schedule.teacher?.id === scheduleToMove.teacher?.id
+    );
+    
+    if (teacherConflicts.length > 0) {
+      conflicts.push({
+        message: `Teacher ${scheduleToMove.teacher?.firstName} ${scheduleToMove.teacher?.lastName} is already scheduled at this time`
+      });
+    }
+    
+    // Check for classroom conflicts
+    const classroomConflicts = filteredSchedules.filter(schedule => 
+      schedule.id !== scheduleToMove.id &&
+      schedule.dayOfWeek === day &&
+      schedule.startTime === timeSlot.start &&
+      schedule.endTime === timeSlot.end &&
+      schedule.classroom?.id === scheduleToMove.classroom?.id
+    );
+    
+    if (classroomConflicts.length > 0) {
+      conflicts.push({
+        message: `Classroom ${scheduleToMove.classroom?.roomName} is already occupied at this time`
+      });
+    }
+    
+    return conflicts;
+  };
+
   const getStatusColor = (status) => {
     switch (status) {
       case 'scheduled': return 'success';
@@ -231,6 +761,18 @@ const ScheduleViewer = () => {
           Schedule Viewer
         </Typography>
         <Box>
+          {/* Add Schedule Button - Only for admins */}
+          {isAdmin() && (
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={handleAddSchedule}
+              sx={{ mr: 2 }}
+            >
+              Add Schedule
+            </Button>
+          )}
+          
           <Tooltip title="Table View">
             <IconButton 
               onClick={() => setViewMode('table')} 
@@ -266,16 +808,29 @@ const ScheduleViewer = () => {
       </Box>
 
       <Typography variant="subtitle1" color="textSecondary" gutterBottom>
-        View and filter schedules by classroom, teacher, or section
+        {isTeacher() 
+          ? `Viewing your personal schedule for ${user?.name || 'Teacher'}`
+          : 'View and filter schedules by classroom, teacher, or section'
+        }
       </Typography>
+      
+      {/* Debug info - remove this after testing */}
+      <Alert severity="info" sx={{ mb: 2 }}>
+        <Typography variant="body2">
+          Debug Info: User Role = {user?.role || 'Not logged in'}, 
+          isAdmin = {isAdmin() ? 'Yes' : 'No'}, 
+          isTeacher = {isTeacher() ? 'Yes' : 'No'}
+        </Typography>
+      </Alert>
 
-      {/* Filters */}
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            <FilterListIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-            Filters
-          </Typography>
+      {/* Filters - Only show for admins */}
+      {isAdmin() && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              <FilterListIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+              Filters
+            </Typography>
           <Grid container spacing={2} alignItems="center">
             <Grid item xs={12} sm={6} md={3}>
               <TextField
@@ -365,7 +920,37 @@ const ScheduleViewer = () => {
           </Grid>
         </CardContent>
       </Card>
+      )}
 
+      {/* Simple Search for Teachers */}
+      {isTeacher() && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              <SearchIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+              Search Your Schedule
+            </Typography>
+            <Grid container spacing={2} alignItems="center">
+              <Grid item xs={12} sm={6} md={4}>
+                <TextField
+                  fullWidth
+                  label="Search"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <SearchIcon />
+                      </InputAdornment>
+                    ),
+                  }}
+                  placeholder="Search by subject, classroom, section..."
+                />
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Results Summary */}
       <Box mb={2}>
@@ -373,8 +958,8 @@ const ScheduleViewer = () => {
           Showing {filteredSchedules.length} of {schedules.length} schedules
         </Typography>
         
-        {/* Subject Mismatch Warning */}
-        {filterType === 'teacher' && selectedTeacher && (() => {
+        {/* Subject Mismatch Warning - Only for admins */}
+        {isAdmin() && filterType === 'teacher' && selectedTeacher && (() => {
           const selectedTeacherData = teachers.find(t => t.id === selectedTeacher);
           const mismatchedSchedules = filteredSchedules.filter(schedule => 
             schedule.subject !== selectedTeacherData?.subject
@@ -410,12 +995,13 @@ const ScheduleViewer = () => {
               <TableCell>Classroom</TableCell>
               <TableCell>Section</TableCell>
               <TableCell>Status</TableCell>
+              <TableCell>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {filteredSchedules.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} align="center">
+                <TableCell colSpan={8} align="center">
                   <Typography variant="body2" color="textSecondary">
                     No schedules found matching your criteria
                   </Typography>
@@ -497,6 +1083,31 @@ const ScheduleViewer = () => {
                       size="small"
                     />
                   </TableCell>
+                  <TableCell>
+                    <Box display="flex" gap={1}>
+                      {/* Edit Button */}
+                      <Tooltip title="Edit Schedule">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleEditSchedule(schedule)}
+                          color="primary"
+                        >
+                          <EditIcon />
+                        </IconButton>
+                      </Tooltip>
+                      
+                      {/* Delete Button */}
+                      <Tooltip title="Delete Schedule">
+                        <IconButton
+                          size="small"
+                          onClick={() => handleDeleteSchedule(schedule)}
+                          color="error"
+                        >
+                          <DeleteIcon />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+                  </TableCell>
                 </TableRow>
               ))
             )}
@@ -506,6 +1117,14 @@ const ScheduleViewer = () => {
       ) : (
         /* Weekly View */
         <Box>
+          {isAdmin() && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <Typography variant="body2">
+                💡 <strong>Drag & Drop:</strong> You can drag schedule cards to move them between time slots and days. 
+                The system will automatically detect conflicts and prevent invalid moves.
+              </Typography>
+            </Alert>
+          )}
           {(() => {
             const daysOfWeek = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
             const timeSlots = [
@@ -548,18 +1167,54 @@ const ScheduleViewer = () => {
                             schedule.endTime === timeSlot.end
                           );
                           
+                          const isDragOver = dragOverSlot && 
+                            dragOverSlot.day === day && 
+                            dragOverSlot.timeSlot.start === timeSlot.start;
+                          
+                          const isBeingDragged = draggedSchedule && 
+                            draggedSchedule.dayOfWeek === day && 
+                            draggedSchedule.startTime === timeSlot.start;
+                          
                           return (
-                            <TableCell key={`${day}-${timeSlot.start}`} align="center">
+                            <TableCell 
+                              key={`${day}-${timeSlot.start}`} 
+                              align="center"
+                              onDragOver={(e) => handleDragOver(e, day, timeSlot)}
+                              onDragLeave={handleDragLeave}
+                              onDrop={(e) => handleDrop(e, day, timeSlot)}
+                              sx={{
+                                border: isDragOver ? '2px dashed #1976d2' : '1px solid #e0e0e0',
+                                backgroundColor: isDragOver ? 'rgba(25, 118, 210, 0.1)' : 'transparent',
+                                transition: 'all 0.2s ease',
+                                position: 'relative'
+                              }}
+                            >
                               {scheduleForSlot ? (
-                                <Card sx={{ 
-                                  p: 1, 
-                                  bgcolor: 'primary.light', 
-                                  color: 'primary.contrastText',
-                                  minHeight: 80,
-                                  display: 'flex',
-                                  flexDirection: 'column',
-                                  justifyContent: 'center'
-                                }}>
+                                <Card 
+                                  draggable={isAdmin()}
+                                  onDragStart={(e) => handleDragStart(e, scheduleForSlot)}
+                                  onDragEnd={handleDragEnd}
+                                  sx={{ 
+                                    p: 1, 
+                                    bgcolor: isBeingDragged ? 'primary.main' : 'primary.light', 
+                                    color: 'primary.contrastText',
+                                    minHeight: 80,
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    justifyContent: 'center',
+                                    cursor: isAdmin() ? 'grab' : 'default',
+                                    opacity: isBeingDragged ? 0.5 : 1,
+                                    transform: isBeingDragged ? 'scale(0.95)' : 'scale(1)',
+                                    transition: 'all 0.2s ease',
+                                    '&:hover': {
+                                      transform: isAdmin() ? 'scale(1.02)' : 'scale(1)',
+                                      boxShadow: isAdmin() ? 3 : 1
+                                    },
+                                    '&:active': {
+                                      cursor: isAdmin() ? 'grabbing' : 'default'
+                                    }
+                                  }}
+                                >
                                   <Typography variant="caption" fontWeight="bold">
                                     {scheduleForSlot.subject}
                                   </Typography>
@@ -578,11 +1233,31 @@ const ScheduleViewer = () => {
                                       : scheduleForSlot.section?.sectionName || scheduleForSlot.section?.name || 'N/A'
                                     }
                                   </Typography>
+                                  {isAdmin() && (
+                                    <Typography variant="caption" display="block" sx={{ mt: 0.5, fontStyle: 'italic' }}>
+                                      Drag to move
+                                    </Typography>
+                                  )}
                                 </Card>
                               ) : (
-                                <Box sx={{ minHeight: 80, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                  <Typography variant="caption" color="textSecondary">
-                                    Free
+                                <Box 
+                                  sx={{ 
+                                    minHeight: 80, 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    justifyContent: 'center',
+                                    border: isDragOver ? '2px dashed #4caf50' : '2px dashed transparent',
+                                    borderRadius: 1,
+                                    backgroundColor: isDragOver ? 'rgba(76, 175, 80, 0.1)' : 'transparent',
+                                    transition: 'all 0.2s ease'
+                                  }}
+                                >
+                                  <Typography 
+                                    variant="caption" 
+                                    color={isDragOver ? 'primary' : 'textSecondary'}
+                                    sx={{ fontWeight: isDragOver ? 'bold' : 'normal' }}
+                                  >
+                                    {isDragOver ? 'Drop here' : 'Free'}
                                   </Typography>
                                 </Box>
                               )}
@@ -598,6 +1273,353 @@ const ScheduleViewer = () => {
           })()}
         </Box>
       )}
+
+      {/* Add Schedule Dialog */}
+      <Dialog open={addDialogOpen} onClose={handleCancelAdd} maxWidth="md" fullWidth>
+        <DialogTitle>
+          Add New Schedule
+        </DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Date"
+                type="date"
+                value={addFormData.date}
+                onChange={handleAddFormChange('date')}
+                InputLabelProps={{ shrink: true }}
+                required
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Start Time"
+                type="time"
+                value={addFormData.startTime}
+                onChange={handleAddFormChange('startTime')}
+                InputLabelProps={{ shrink: true }}
+                required
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="End Time"
+                type="time"
+                value={addFormData.endTime}
+                onChange={handleAddFormChange('endTime')}
+                InputLabelProps={{ shrink: true }}
+                required
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth required>
+                <InputLabel>Day of Week</InputLabel>
+                <Select
+                  value={addFormData.dayOfWeek}
+                  label="Day of Week"
+                  onChange={handleAddFormChange('dayOfWeek')}
+                >
+                  <MenuItem value="MONDAY">Monday</MenuItem>
+                  <MenuItem value="TUESDAY">Tuesday</MenuItem>
+                  <MenuItem value="WEDNESDAY">Wednesday</MenuItem>
+                  <MenuItem value="THURSDAY">Thursday</MenuItem>
+                  <MenuItem value="FRIDAY">Friday</MenuItem>
+                  <MenuItem value="SATURDAY">Saturday</MenuItem>
+                  <MenuItem value="SUNDAY">Sunday</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth required>
+                <InputLabel>Teacher</InputLabel>
+                <Select
+                  value={addFormData.teacher}
+                  label="Teacher"
+                  onChange={handleAddFormChange('teacher')}
+                >
+                  {teachers.map((teacher) => (
+                    <MenuItem key={teacher.id} value={teacher.id}>
+                      {teacher.firstName} {teacher.lastName} ({teacher.subject})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth required>
+                <InputLabel>Classroom</InputLabel>
+                <Select
+                  value={addFormData.classroom}
+                  label="Classroom"
+                  onChange={handleAddFormChange('classroom')}
+                >
+                  {classrooms.map((classroom) => (
+                    <MenuItem key={classroom.id} value={classroom.id}>
+                      {classroom.roomName} ({classroom.roomType})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth required>
+                <InputLabel>Section</InputLabel>
+                <Select
+                  value={addFormData.section}
+                  label="Section"
+                  onChange={handleAddFormChange('section')}
+                >
+                  {sections.map((section) => (
+                    <MenuItem key={section.id} value={section.id}>
+                      {section.sectionName}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Subject"
+                value={addFormData.subject}
+                onChange={handleAddFormChange('subject')}
+                required
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Notes"
+                value={addFormData.notes}
+                onChange={handleAddFormChange('notes')}
+                multiline
+                rows={3}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <FormGroup>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={addFormData.isRecurring}
+                      onChange={handleAddFormChange('isRecurring')}
+                    />
+                  }
+                  label="Is Recurring Schedule"
+                />
+              </FormGroup>
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancelAdd} startIcon={<CancelIcon />}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleSaveNewSchedule} 
+            variant="contained" 
+            startIcon={<SaveIcon />}
+            disabled={loading}
+          >
+            {loading ? 'Creating...' : 'Create Schedule'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onClose={handleCancelDelete}>
+        <DialogTitle>
+          Confirm Delete
+        </DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to delete this schedule?
+          </Typography>
+          {scheduleToDelete && (
+            <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
+              <Typography variant="subtitle2">
+                <strong>Subject:</strong> {scheduleToDelete.subject}
+              </Typography>
+              <Typography variant="subtitle2">
+                <strong>Teacher:</strong> {scheduleToDelete.teacher ? 
+                  `${scheduleToDelete.teacher.firstName} ${scheduleToDelete.teacher.lastName}` : 
+                  'N/A'
+                }
+              </Typography>
+              <Typography variant="subtitle2">
+                <strong>Day:</strong> {scheduleToDelete.dayOfWeek}
+              </Typography>
+              <Typography variant="subtitle2">
+                <strong>Time:</strong> {scheduleToDelete.startTime} - {scheduleToDelete.endTime}
+              </Typography>
+              <Typography variant="subtitle2">
+                <strong>Classroom:</strong> {scheduleToDelete.classroom?.roomName || 'N/A'}
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancelDelete} startIcon={<CancelIcon />}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleConfirmDelete} 
+            variant="contained" 
+            color="error"
+            startIcon={<DeleteIcon />}
+            disabled={loading}
+          >
+            {loading ? 'Deleting...' : 'Delete Schedule'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit Schedule Dialog */}
+      <Dialog open={editDialogOpen} onClose={handleCancelEdit} maxWidth="md" fullWidth>
+        <DialogTitle>
+          Edit Schedule
+        </DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Start Time"
+                type="time"
+                value={editFormData.startTime}
+                onChange={handleEditFormChange('startTime')}
+                InputLabelProps={{ shrink: true }}
+                required
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="End Time"
+                type="time"
+                value={editFormData.endTime}
+                onChange={handleEditFormChange('endTime')}
+                InputLabelProps={{ shrink: true }}
+                required
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth required>
+                <InputLabel>Day of Week</InputLabel>
+                <Select
+                  value={editFormData.dayOfWeek}
+                  label="Day of Week"
+                  onChange={handleEditFormChange('dayOfWeek')}
+                >
+                  <MenuItem value="MONDAY">Monday</MenuItem>
+                  <MenuItem value="TUESDAY">Tuesday</MenuItem>
+                  <MenuItem value="WEDNESDAY">Wednesday</MenuItem>
+                  <MenuItem value="THURSDAY">Thursday</MenuItem>
+                  <MenuItem value="FRIDAY">Friday</MenuItem>
+                  <MenuItem value="SATURDAY">Saturday</MenuItem>
+                  <MenuItem value="SUNDAY">Sunday</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth required>
+                <InputLabel>Teacher</InputLabel>
+                <Select
+                  value={editFormData.teacher}
+                  label="Teacher"
+                  onChange={handleEditFormChange('teacher')}
+                >
+                  {teachers.map((teacher) => (
+                    <MenuItem key={teacher.id} value={teacher.id}>
+                      {teacher.firstName} {teacher.lastName} ({teacher.subject})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth required>
+                <InputLabel>Classroom</InputLabel>
+                <Select
+                  value={editFormData.classroom}
+                  label="Classroom"
+                  onChange={handleEditFormChange('classroom')}
+                >
+                  {classrooms.map((classroom) => (
+                    <MenuItem key={classroom.id} value={classroom.id}>
+                      {classroom.roomName} ({classroom.roomType})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Subject"
+                value={editFormData.subject}
+                onChange={handleEditFormChange('subject')}
+                required
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Notes"
+                value={editFormData.notes}
+                onChange={handleEditFormChange('notes')}
+                multiline
+                rows={3}
+              />
+            </Grid>
+          </Grid>
+
+          {/* Conflict Warning */}
+          {showConflictWarning && conflicts.length > 0 && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              <Typography variant="h6" gutterBottom>
+                <WarningIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+                Schedule Conflicts Detected!
+              </Typography>
+              {conflicts.map((conflict, index) => (
+                <Typography key={index} variant="body2" sx={{ mb: 1 }}>
+                  • {conflict.message}
+                </Typography>
+              ))}
+              <Typography variant="body2" sx={{ mt: 1, fontWeight: 'bold' }}>
+                Please resolve these conflicts before saving.
+              </Typography>
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCancelEdit} startIcon={<CancelIcon />}>
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleSaveSchedule} 
+            variant="contained" 
+            startIcon={<SaveIcon />}
+            disabled={conflicts.length > 0}
+          >
+            Save Changes
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Success Snackbar */}
+      <Snackbar
+        open={showSuccessSnackbar}
+        autoHideDuration={6000}
+        onClose={() => setShowSuccessSnackbar(false)}
+      >
+        <Alert severity="success" onClose={() => setShowSuccessSnackbar(false)}>
+          {successMessage}
+        </Alert>
+      </Snackbar>
 
       {/* Print Styles */}
       <style jsx global>{`
