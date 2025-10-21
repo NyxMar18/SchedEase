@@ -880,7 +880,7 @@ const ScheduleViewer = () => {
       {/* Debug info - remove this after testing */}
       <Alert severity="info" sx={{ mb: 2 }}>
         <Typography variant="body2">
-         Log in as = {user?.role || 'Not logged in'}
+         Log in as {user?.role || 'Not logged in'}
         </Typography>
       </Alert>
 
