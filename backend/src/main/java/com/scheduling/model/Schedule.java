@@ -42,6 +42,10 @@ public class Schedule {
     @JoinColumn(name = "subject_id", nullable = false)
     private Subject subject;
     
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "school_year_id", nullable = true)
+    private SchoolYear schoolYear;
+    
     private String notes;
     
     private boolean isRecurring;
@@ -172,5 +176,13 @@ public class Schedule {
     
     public void setDurationIndex(Integer durationIndex) {
         this.durationIndex = durationIndex;
+    }
+    
+    public SchoolYear getSchoolYear() {
+        return schoolYear;
+    }
+    
+    public void setSchoolYear(SchoolYear schoolYear) {
+        this.schoolYear = schoolYear;
     }
 }

@@ -12,7 +12,6 @@ import {
   ListItemText,
     Menu,
   MenuItem,
-  Avatar,
   Divider,
   Toolbar,
   Typography,
@@ -25,14 +24,13 @@ import {
   School as SchoolIcon,
   Person as PersonIcon,
   Book as BookIcon,
-  Schedule as ScheduleIcon,
   Group as GroupIcon,
   AutoAwesome as AutoAwesomeIcon,
   Visibility as VisibilityIcon,
-  Restore as RestoreIcon,
   AccountCircle as AccountCircleIcon,
   Logout as LogoutIcon,
   Lock as LockIcon,
+  CalendarToday as CalendarTodayIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -46,6 +44,7 @@ const adminMenuItems = [
   { text: 'Sections', icon: <GroupIcon />, path: '/sections' },
   { text: 'Teachers', icon: <PersonIcon />, path: '/teachers' },
   { text: 'Subjects', icon: <BookIcon />, path: '/subjects' },
+  { text: 'School Years', icon: <CalendarTodayIcon />, path: '/school-years' },
   { text: 'Auto Schedule', icon: <AutoAwesomeIcon />, path: '/auto-schedule' },
   { text: 'Schedule Viewer', icon: <VisibilityIcon />, path: '/schedule-viewer' },
   { text: 'Firebase Test', icon: <AutoAwesomeIcon />, path: '/firebase-test' },
@@ -90,7 +89,7 @@ function Layout({ children }) {
   const handleLogout = () => {
     logout();
     handleUserMenuClose();
-    navigate('/login');
+    navigate('/');
   };
 
   const handleChangePassword = () => {
@@ -152,7 +151,7 @@ function Layout({ children }) {
             <MenuIcon />
           </IconButton>
           <Typography variant="h4" noWrap component="div" sx={{ flexGrow: 1 }}>
-           Senior High School Scheduling System
+           Welcome to CIT-U Senior High School Scheduling System
           </Typography>
           
           {/* User Menu */}

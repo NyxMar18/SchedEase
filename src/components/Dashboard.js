@@ -13,7 +13,6 @@ import {
   School as SchoolIcon,
   Person as PersonIcon,
   Schedule as ScheduleIcon,
-  TrendingUp as TrendingUpIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { classroomAPI, teacherAPI, scheduleAPI } from '../services/api';
@@ -104,9 +103,7 @@ const Dashboard = () => {
       <Typography variant="h4" gutterBottom>
         Dashboard
       </Typography>
-      <Typography variant="subtitle1" color="textSecondary" gutterBottom>
-        Welcome to the School Scheduling System
-      </Typography>
+
 
       <Grid container spacing={3} sx={{ mt: 2 }}>
         <Grid item xs={12} sm={6} md={3}>
@@ -133,14 +130,7 @@ const Dashboard = () => {
             color="success"
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Utilization"
-            value="85%"
-            icon={<TrendingUpIcon sx={{ fontSize: 40 }} />}
-            color="warning"
-          />
-        </Grid>
+
       </Grid>
 
       <Grid container spacing={3} sx={{ mt: 2 }}>

@@ -1,7 +1,9 @@
 package com.scheduling.controller;
 
 import com.scheduling.model.Schedule;
+import com.scheduling.model.SchoolYear;
 import com.scheduling.repository.ScheduleRepository;
+import com.scheduling.repository.SchoolYearRepository;
 import com.scheduling.service.SchedulingService;
 import com.scheduling.service.SchedulingResult;
 import jakarta.validation.Valid;
@@ -25,11 +27,25 @@ public class ScheduleController {
     private ScheduleRepository scheduleRepository;
     
     @Autowired
+    private SchoolYearRepository schoolYearRepository;
+    
+    @Autowired
     private SchedulingService schedulingService;
     
     @GetMapping
     public ResponseEntity<List<Schedule>> getAllSchedules() {
         List<Schedule> schedules = scheduleRepository.findAll();
+        return ResponseEntity.ok(schedules);
+    }
+    
+    @GetMapping("/by-school-year/{schoolYearId}")
+    public ResponseEntity<List<Schedule>> getSchedulesBySchoolYear(@PathVariable Long schoolYearId) {
+        Optional<SchoolYear> schoolYear = schoolYearRepository.findById(schoolYearId);
+        if (!schoolYear.isPresent()) {
+            return ResponseEntity.notFound().build();
+        }
+        
+        List<Schedule> schedules = scheduleRepository.findBySchoolYear(schoolYear.get());
         return ResponseEntity.ok(schedules);
     }
     

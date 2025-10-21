@@ -17,6 +17,13 @@ import {
   Paper,
   LinearProgress,
   Chip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Select,
+  MenuItem,
+  Collapse,
 } from '@mui/material';
 import {
   AutoAwesome as AutoAwesomeIcon,
@@ -28,13 +35,20 @@ import {
   Delete as DeleteIcon,
   Warning as WarningIcon,
   Error as ErrorIcon,
-  Info as InfoIcon,
-  CheckCircle as CheckCircleIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
 } from '@mui/icons-material';
 import { sectionAPI } from '../firebase/sectionService';
 import { teacherAPI, classroomAPI, scheduleAPI } from '../services/api';
 import { subjectAPI } from '../firebase/subjectService';
 import { userAPI } from '../services/userService';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, collection, getDocs, query, orderBy } from 'firebase/firestore';
+import firebaseConfig from '../firebase/config';
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
 const AutoSchedule = () => {
   const [sections, setSections] = useState([]);
@@ -44,9 +58,32 @@ const AutoSchedule = () => {
   const [subjects, setSubjects] = useState([]);
   const [generatedSchedules, setGeneratedSchedules] = useState([]);
   const [failedSchedules, setFailedSchedules] = useState([]);
+  const [schoolYears, setSchoolYears] = useState([]);
+  const [selectedSchoolYear, setSelectedSchoolYear] = useState('');
+  const [showSchoolYearDialog, setShowSchoolYearDialog] = useState(false);
+  const [showDeleteSchoolYearDialog, setShowDeleteSchoolYearDialog] = useState(false);
+  const [deleteSelectedSchoolYear, setDeleteSelectedSchoolYear] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  
+  // Collapsible sections state
+  const [expandedSections, setExpandedSections] = useState({
+    scheduleDistribution: true,
+    scheduleSummary: true,
+    generatedSchedule: true,
+    scheduleSummary2: true,
+    classroomUtilization: true,
+    teacherWorkload: true
+  });
+
+  // Toggle section collapse
+  const toggleSection = (sectionName) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [sectionName]: !prev[sectionName]
+    }));
+  };
 
   const daysOfWeek = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
   const schedulePatterns = [
@@ -116,19 +153,22 @@ const AutoSchedule = () => {
 
   const fetchData = async () => {
     try {
-      const [sectionsRes, teachersRes, usersRes, classroomsRes, subjectsRes] = await Promise.all([
+        const [sectionsRes, teachersRes, usersRes, classroomsRes, subjectsRes] = await Promise.all([
         sectionAPI.getAll(),
         teacherAPI.getAll(),
-        userAPI.getAll(),
+          userAPI.getAll(),
         classroomAPI.getAll(),
         subjectAPI.getAll(),
       ]);
 
       setSections(sectionsRes.data);
       setTeachers(teachersRes.data);
-      setUsers(usersRes.data);
+        setUsers(usersRes.data);
       setClassrooms(classroomsRes.data);
       setSubjects(subjectsRes.data);
+        
+        // Fetch school years from localStorage
+        await fetchSchoolYearsFromStorage();
     } catch (err) {
       setError('Failed to fetch data');
     }
@@ -137,6 +177,12 @@ const AutoSchedule = () => {
   const generateSchedule = async () => {
     if (sections.length === 0) {
       setError('Please add sections first');
+      return;
+    }
+    
+    // Check if school year is selected
+    if (!selectedSchoolYear) {
+      setShowSchoolYearDialog(true);
       return;
     }
     if (teachers.length === 0) {
@@ -203,11 +249,6 @@ const AutoSchedule = () => {
         return classroomUsageList[0]?.classroom;
       };
       
-      const getLeastUsedDay = (availableDays) => {
-        const availableDayUsage = availableDays.map(day => ({ day, count: dayUsage[day] }));
-        availableDayUsage.sort((a, b) => a.count - b.count);
-        return availableDayUsage[0]?.day;
-      };
       
       const getLeastUsedTimeSlot = (availableTimeSlots) => {
         const availableTimeUsage = availableTimeSlots.map(slot => ({ 
@@ -446,6 +487,7 @@ const AutoSchedule = () => {
                       section: request.section,
                       subjectDuration: request.totalDuration,
                       durationIndex: 0,
+                      schoolYearId: selectedSchoolYear, // Add school year ID
                       notes: `Auto-generated uniform schedule for ${request.section.sectionName} - ${request.subject.name} at ${timeSlot.start}`,
                 isRecurring: true,
                 status: 'scheduled'
@@ -513,6 +555,12 @@ const AutoSchedule = () => {
       setGeneratedSchedules(schedules);
       setFailedSchedules(failedSchedulesList);
       
+      // Debug logging for failed schedules
+      console.log('🔍 Setting failed schedules:', failedSchedulesList.length, 'entries');
+      if (failedSchedulesList.length > 0) {
+        console.log('❌ Failed schedules details:', failedSchedulesList);
+      }
+      
       if (savedCount > 0) {
         // Calculate distribution statistics
         const dayStats = Object.entries(dayUsage).map(([day, count]) => `${day}: ${count}`).join(', ');
@@ -574,30 +622,20 @@ const AutoSchedule = () => {
     }
   };
 
-  const clearSchedule = async () => {
-    try {
-      setLoading(true);
-      
-      // Clear from local state
-      setGeneratedSchedules([]);
-      setFailedSchedules([]);
-      
-      // Optionally clear from database (uncomment if you want to delete all schedules)
-      // const existingSchedules = await scheduleAPI.getAll();
-      // for (const schedule of existingSchedules.data) {
-      //   await scheduleAPI.delete(schedule.id);
-      // }
-      
-      setSuccess('Schedule cleared from display');
-    } catch (error) {
-      setError('Failed to clear schedule');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const deleteAllSchedules = async () => {
-    if (!window.confirm('Are you sure you want to delete ALL generated schedules? This action cannot be undone.')) {
+    // Show school year selection dialog instead of deleting all
+    setShowDeleteSchoolYearDialog(true);
+  };
+
+  const handleDeleteSchedulesBySchoolYear = async () => {
+    if (!deleteSelectedSchoolYear) {
+      setError('Please select a school year to delete schedules from.');
+      return;
+    }
+
+    const selectedSchoolYearName = schoolYears.find(sy => sy.id === deleteSelectedSchoolYear)?.name;
+    if (!window.confirm(`⚠️ Are you sure you want to delete ALL schedules for "${selectedSchoolYearName}"? This action cannot be undone.`)) {
       return;
     }
 
@@ -605,15 +643,22 @@ const AutoSchedule = () => {
       setLoading(true);
       setError(null);
       
-      console.log('🗑️ Starting to delete all schedules...');
+      console.log(`🗑️ Starting to delete schedules for school year: ${selectedSchoolYearName}...`);
       
       // Get all existing schedules
       const existingSchedules = await scheduleAPI.getAll();
       console.log('📋 Schedule API response:', existingSchedules);
-      console.log(`📋 Found ${existingSchedules.data?.length || 0} schedules to delete`);
       
-      if (!existingSchedules.data || existingSchedules.data.length === 0) {
-        setSuccess('✅ No schedules found to delete.');
+      // Filter schedules by selected school year
+      const schedulesToDelete = existingSchedules.data.filter(schedule => 
+        schedule.schoolYearId === deleteSelectedSchoolYear
+      );
+      
+      console.log(`📋 Found ${schedulesToDelete.length} schedules to delete for school year: ${selectedSchoolYearName}`);
+      
+      if (schedulesToDelete.length === 0) {
+        setSuccess(`✅ No schedules found for "${selectedSchoolYearName}".`);
+        setShowDeleteSchoolYearDialog(false);
         return;
       }
       
@@ -621,7 +666,7 @@ const AutoSchedule = () => {
       let failedCount = 0;
       
       // Delete each schedule
-        for (const schedule of existingSchedules.data) {
+      for (const schedule of schedulesToDelete) {
           try {
           console.log(`🗑️ Attempting to delete schedule:`, schedule);
             await scheduleAPI.delete(schedule.id);
@@ -633,17 +678,20 @@ const AutoSchedule = () => {
         }
       }
       
-      // Clear local state
+      // Clear local state if we deleted schedules for the currently selected school year
+      if (deleteSelectedSchoolYear === selectedSchoolYear) {
       setGeneratedSchedules([]);
-      setFailedSchedules([]);
+        setFailedSchedules([]);
+      }
       
       if (failedCount === 0) {
-        setSuccess(`✅ Successfully deleted all ${deletedCount} schedules from the database!`);
+        setSuccess(`✅ Successfully deleted all ${deletedCount} schedules from "${selectedSchoolYearName}"!`);
       } else {
         setError(`⚠️ Deleted ${deletedCount} schedules, but ${failedCount} failed to delete. Check console for details.`);
       }
       
       console.log(`🗑️ Deletion complete: ${deletedCount} deleted, ${failedCount} failed`);
+      setShowDeleteSchoolYearDialog(false);
       
     } catch (error) {
       console.error('❌ Error during schedule deletion:', error);
@@ -652,6 +700,29 @@ const AutoSchedule = () => {
       setLoading(false);
     }
   };
+
+  // School Year Management functions using Firebase
+  const fetchSchoolYearsFromStorage = async () => {
+    try {
+      const schoolYearsRef = collection(db, 'schoolYears');
+      const q = query(schoolYearsRef, orderBy('name', 'desc'));
+      const querySnapshot = await getDocs(q);
+      const schoolYears = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setSchoolYears(schoolYears);
+      
+      // Set active school year as default if available
+      const activeSchoolYear = schoolYears.find(sy => sy.isActive);
+      if (activeSchoolYear) {
+        setSelectedSchoolYear(activeSchoolYear.id);
+      }
+    } catch (err) {
+      console.error('Failed to fetch school years:', err);
+    }
+  };
+
 
   return (
     <Box sx={{ p: 3 }}>
@@ -728,9 +799,15 @@ const AutoSchedule = () => {
       {/* Schedule Pattern Breakdown */}
       <Card sx={{ mb: 3, bgcolor: 'info.light', color: 'white' }}>
         <CardContent>
-          <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
-            📅 Schedule Pattern Distribution
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => toggleSection('scheduleDistribution')}>
+            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', mb: 0 }}>
+              📅 Schedule Pattern Distribution
+            </Typography>
+            {expandedSections.scheduleDistribution ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+          </Box>
+        </CardContent>
+        <Collapse in={expandedSections.scheduleDistribution}>
+          <CardContent sx={{ pt: 0 }}>
           <Grid container spacing={2}>
             {schedulePatterns.map(pattern => {
               // Count subjects that would use this pattern based on their duration
@@ -769,6 +846,43 @@ const AutoSchedule = () => {
           <Typography variant="body2" sx={{ mt: 2, opacity: 0.9 }}>
             💡 Schedule patterns are automatically assigned based on subject duration: 1-2h→TTH, 3h→MWF, 4+h→DAILY for optimal week utilization.
           </Typography>
+          </CardContent>
+        </Collapse>
+      </Card>
+
+      {/* School Year Selection */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <SchoolIcon color="primary" />
+            School Year Selection
+          </Typography>
+          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+            Select which school year the generated schedules will belong to. This helps organize schedules by academic periods.
+          </Typography>
+          
+          {schoolYears.length > 0 ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Typography variant="body2" fontWeight="medium">
+                Selected School Year:
+              </Typography>
+              <Chip
+                label={selectedSchoolYear ? schoolYears.find(sy => sy.id === selectedSchoolYear)?.name || 'Not selected' : 'Not selected'}
+                color={selectedSchoolYear ? 'primary' : 'default'}
+                variant={selectedSchoolYear ? 'filled' : 'outlined'}
+              />
+              <Button
+                size="small"
+                onClick={() => setShowSchoolYearDialog(true)}
+              >
+                {selectedSchoolYear ? 'Change' : 'Select'} School Year
+              </Button>
+            </Box>
+          ) : (
+            <Alert severity="warning">
+              No school years found. Please create a school year first before generating schedules.
+            </Alert>
+          )}
         </CardContent>
       </Card>
 
@@ -783,13 +897,26 @@ const AutoSchedule = () => {
         >
           Generate Schedule
         </Button>
-        <Button
-          variant="outlined"
-          onClick={clearSchedule}
-          disabled={generatedSchedules.length === 0}
-        >
-          Clear Schedule
-        </Button>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Typography variant="body2" fontWeight="medium">
+            School Year:
+          </Typography>
+          <Select
+            value={selectedSchoolYear || ''}
+            onChange={(e) => setSelectedSchoolYear(e.target.value)}
+            displayEmpty
+            sx={{ minWidth: 180 }}
+          >
+            <MenuItem value="">
+              <em>Select School Year</em>
+            </MenuItem>
+            {schoolYears.map((schoolYear) => (
+              <MenuItem key={schoolYear.id} value={schoolYear.id}>
+                {schoolYear.name} {schoolYear.isActive && '(Active)'}
+              </MenuItem>
+            ))}
+          </Select>
+        </Box>
         <Button
           variant="outlined"
           color="error"
@@ -806,47 +933,7 @@ const AutoSchedule = () => {
             }
           }}
         >
-          Delete All Schedules
-        </Button>
-        <Button
-          variant="outlined"
-          color="warning"
-          startIcon={<WarningIcon />}
-          onClick={() => {
-            // Test button to show failed schedules table
-            const testFailedSchedules = [
-              {
-                section: 'Section A',
-                subject: 'Mathematics',
-                reason: 'No teacher available',
-                details: 'No teacher found for subject: Mathematics',
-                type: 'missing_teacher',
-                resolution: 'Add a teacher who can teach Mathematics'
-              },
-              {
-                section: 'Section B',
-                subject: 'Science',
-                reason: 'No classroom available',
-                details: 'No classroom found for room type: Laboratory',
-                type: 'missing_classroom',
-                resolution: 'Add a classroom with room type: Laboratory'
-              },
-              {
-                section: 'Section C',
-                subject: 'English',
-                reason: 'No available time slots',
-                details: 'No available time slots found after 20 attempts',
-                type: 'time_conflict',
-                resolution: 'Add more time slots or reduce subject duration'
-              }
-            ];
-            setFailedSchedules(testFailedSchedules);
-            setSuccess('Test failed schedules loaded. Check the table below.');
-          }}
-          disabled={loading}
-          sx={{ ml: 1 }}
-        >
-          Test Failed Schedules
+          Delete Schedules by School Year
         </Button>
       </Box>
 
@@ -855,40 +942,219 @@ const AutoSchedule = () => {
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
 
-      {/* Distribution Statistics */}
+      {/* Enhanced Schedule Distribution Dashboard */}
       {generatedSchedules.length > 0 && (
-        <Card sx={{ mb: 3 }}>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>
-              <ScheduleIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-              Schedule Distribution
+        <Card sx={{ mb: 3, borderRadius: 3, boxShadow: 3 }}>
+          <CardContent sx={{ p: 3 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+              <ScheduleIcon sx={{ mr: 2, color: 'primary.main', fontSize: 28 }} />
+              <Typography variant="h5" fontWeight="bold" color="primary.main">
+                Schedule Distribution Overview
+              </Typography>
+            </Box>
+            
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              📊 Visual breakdown of how your schedules are distributed across days and time slots
             </Typography>
-            <Grid container spacing={2}>
+
+            <Grid container spacing={3}>
+              {/* Days Distribution */}
               <Grid item xs={12} md={6}>
-                <Typography variant="subtitle2" gutterBottom>Days Distribution:</Typography>
-                {Object.entries({ MONDAY: 0, TUESDAY: 0, WEDNESDAY: 0, THURSDAY: 0, FRIDAY: 0 }).map(([day, _]) => {
-                  const count = generatedSchedules.filter(s => s.dayOfWeek === day).length;
-                  return (
-                    <Box key={day} sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                      <Typography variant="body2">{day}:</Typography>
-                      <Chip label={count} size="small" color={count > 0 ? "primary" : "default"} />
-                    </Box>
-                  );
-                })}
+                <Box sx={{ 
+                  borderRadius: 2, 
+                  p: 2.5, 
+                  height: '100%',
+                  border: '1px solid',
+                  borderColor: 'grey.200'
+                }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                    <Typography variant="h6" fontWeight="bold" color="primary.main">
+                      📅 Days Distribution
+                    </Typography>
+                    <Typography variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
+                      Classes per day
+                    </Typography>
+                  </Box>
+                  
+                  {Object.entries({ MONDAY: 0, TUESDAY: 0, WEDNESDAY: 0, THURSDAY: 0, FRIDAY: 0 }).map(([day, _]) => {
+                    const count = generatedSchedules.filter(s => s.dayOfWeek === day).length;
+                    const percentage = generatedSchedules.length > 0 ? Math.round((count / generatedSchedules.length) * 100) : 0;
+                    const maxCount = Math.max(...Object.values({ MONDAY: 0, TUESDAY: 0, WEDNESDAY: 0, THURSDAY: 0, FRIDAY: 0 }).map((_, index) => 
+                      generatedSchedules.filter(s => s.dayOfWeek === Object.keys({ MONDAY: 0, TUESDAY: 0, WEDNESDAY: 0, THURSDAY: 0, FRIDAY: 0 })[index]).length
+                    ));
+                    
+                    return (
+                      <Box key={day} sx={{ mb: 2 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                          <Typography variant="body2" fontWeight="medium" color="text.primary">
+                            {day.charAt(0) + day.slice(1).toLowerCase()}
+                          </Typography>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              {percentage}%
+                            </Typography>
+                            <Chip 
+                              label={count} 
+                              size="small" 
+                              sx={{ 
+                                bgcolor: count > 0 ? 'primary.main' : 'grey.300',
+                                color: count > 0 ? 'white' : 'grey.600',
+                                fontWeight: 'bold',
+                                minWidth: '40px'
+                              }} 
+                            />
+                          </Box>
+                        </Box>
+                        
+                        {/* Progress Bar */}
+                        <Box sx={{ 
+                          width: '100%', 
+                          height: 6, 
+                          bgcolor: 'grey.200', 
+                          borderRadius: 3,
+                          overflow: 'hidden'
+                        }}>
+                          <Box sx={{ 
+                            width: `${maxCount > 0 ? (count / maxCount) * 100 : 0}%`, 
+                            height: '100%', 
+                            bgcolor: count > 0 ? 'primary.main' : 'grey.300',
+                            borderRadius: 3,
+                            transition: 'width 0.3s ease'
+                          }} />
+                        </Box>
+                      </Box>
+                    );
+                  })}
+                </Box>
               </Grid>
+
+              {/* Time Distribution */}
               <Grid item xs={12} md={6}>
-                <Typography variant="subtitle2" gutterBottom>Time Distribution:</Typography>
-                {timeSlots.map((timeSlot) => {
-                  const count = generatedSchedules.filter(s => s.startTime === timeSlot.start).length;
-                  return (
-                    <Box key={timeSlot.start} sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                      <Typography variant="body2">{timeSlot.start}-{timeSlot.end}:</Typography>
-                      <Chip label={count} size="small" color={count > 0 ? "secondary" : "default"} />
-                    </Box>
-                  );
-                })}
+                <Box sx={{ 
+                  borderRadius: 2, 
+                  p: 2.5, 
+                  height: '100%',
+                  border: '1px solid',
+                  borderColor: 'grey.200'
+                }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                    <Typography variant="h6" fontWeight="bold" color="secondary.main">
+                      ⏰ Time Distribution
+                    </Typography>
+                    <Typography variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
+                      Classes per time slot
+                    </Typography>
+                  </Box>
+                  
+                  <Box sx={{ maxHeight: 300, overflowY: 'auto', pr: 1 }}>
+                    {timeSlots.map((timeSlot) => {
+                      const count = generatedSchedules.filter(s => s.startTime === timeSlot.start).length;
+                      const percentage = generatedSchedules.length > 0 ? Math.round((count / generatedSchedules.length) * 100) : 0;
+                      const maxCount = Math.max(...timeSlots.map(slot => 
+                        generatedSchedules.filter(s => s.startTime === slot.start).length
+                      ));
+                      
+                      return (
+                        <Box key={timeSlot.start} sx={{ mb: 2 }}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                            <Typography variant="body2" fontWeight="medium" color="text.primary">
+                              {timeSlot.start}-{timeSlot.end}
+                            </Typography>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Typography variant="caption" color="text.secondary">
+                                {percentage}%
+                              </Typography>
+                              <Chip 
+                                label={count} 
+                                size="small" 
+                                sx={{ 
+                                  bgcolor: count > 0 ? 'secondary.main' : 'grey.300',
+                                  color: count > 0 ? 'white' : 'grey.600',
+                                  fontWeight: 'bold',
+                                  minWidth: '40px'
+                                }} 
+                              />
+                            </Box>
+                          </Box>
+                          
+                          {/* Progress Bar */}
+                          <Box sx={{ 
+                            width: '100%', 
+                            height: 6, 
+                            bgcolor: 'grey.200', 
+                            borderRadius: 3,
+                            overflow: 'hidden'
+                          }}>
+                            <Box sx={{ 
+                              width: `${maxCount > 0 ? (count / maxCount) * 100 : 0}%`, 
+                              height: '100%', 
+                              bgcolor: count > 0 ? 'secondary.main' : 'grey.300',
+                              borderRadius: 3,
+                              transition: 'width 0.3s ease'
+                            }} />
+                          </Box>
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                </Box>
               </Grid>
             </Grid>
+
+            {/* Summary Statistics */}
+            <Box sx={{ 
+              mt: 3, 
+              p: 2, 
+              borderRadius: 2,
+              border: '1px solid',
+              borderColor: 'grey.200'
+            }}>
+              <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1, color: 'text.primary' }}>
+                📈 Quick Stats
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={6} sm={3}>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h6" fontWeight="bold" color="primary.main">
+                      {generatedSchedules.length}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Total Classes
+                    </Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={6} sm={3}>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h6" fontWeight="bold" color="secondary.main">
+                      {new Set(generatedSchedules.map(s => s.dayOfWeek)).size}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Active Days
+                    </Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={6} sm={3}>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h6" fontWeight="bold" color="success.main">
+                      {new Set(generatedSchedules.map(s => s.startTime)).size}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Time Slots Used
+                    </Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={6} sm={3}>
+                  <Box sx={{ textAlign: 'center' }}>
+                    <Typography variant="h6" fontWeight="bold" color="warning.main">
+                      {Math.round(generatedSchedules.length / 5)}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Avg/Day
+                    </Typography>
+                  </Box>
+                </Grid>
+              </Grid>
+            </Box>
           </CardContent>
         </Card>
       )}
@@ -897,10 +1163,16 @@ const AutoSchedule = () => {
       {generatedSchedules.length > 0 && (
         <Card sx={{ mb: 3 }}>
           <CardContent>
-            <Typography variant="h6" gutterBottom>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => toggleSection('scheduleSummary')}>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', mb: 0 }}>
               <ScheduleIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
               Schedule Summary
             </Typography>
+              {expandedSections.scheduleSummary ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            </Box>
+          </CardContent>
+          <Collapse in={expandedSections.scheduleSummary}>
+            <CardContent sx={{ pt: 0 }}>
             <Grid container spacing={2}>
               <Grid item xs={12} md={6}>
                 <Typography variant="subtitle2" gutterBottom>Hours per Section:</Typography>
@@ -943,6 +1215,7 @@ const AutoSchedule = () => {
               </Grid>
             </Grid>
           </CardContent>
+          </Collapse>
         </Card>
       )}
 
@@ -950,10 +1223,16 @@ const AutoSchedule = () => {
       {generatedSchedules.length > 0 && (
         <Card>
           <CardContent>
-            <Typography variant="h6" gutterBottom>
-              <ScheduleIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-              Generated Schedule ({generatedSchedules.length} entries)
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => toggleSection('generatedSchedule')}>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', mb: 0 }}>
+                <ScheduleIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+                Generated Schedule ({generatedSchedules.length} entries)
+              </Typography>
+              {expandedSections.generatedSchedule ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            </Box>
+          </CardContent>
+          <Collapse in={expandedSections.generatedSchedule}>
+            <CardContent sx={{ pt: 0 }}>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
               Showing all generated schedule entries. Each subject may have multiple slots per day.
             </Typography>
@@ -1011,7 +1290,8 @@ const AutoSchedule = () => {
                 </TableBody>
               </Table>
             </TableContainer>
-          </CardContent>
+            </CardContent>
+          </Collapse>
         </Card>
       )}
 
@@ -1019,9 +1299,15 @@ const AutoSchedule = () => {
       {generatedSchedules.length > 0 && (
         <Card sx={{ mb: 3, bgcolor: 'success.light', color: 'white' }}>
           <CardContent>
-            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
-              📊 Schedule Summary
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => toggleSection('scheduleSummary2')}>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', mb: 0 }}>
+                📊 Schedule Summary
+              </Typography>
+              {expandedSections.scheduleSummary2 ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            </Box>
+          </CardContent>
+          <Collapse in={expandedSections.scheduleSummary2}>
+            <CardContent sx={{ pt: 0 }}>
             <Grid container spacing={2}>
               <Grid item xs={12} sm={4}>
                 <Box sx={{ textAlign: 'center', p: 2, bgcolor: 'rgba(255,255,255,0.1)', borderRadius: 2 }}>
@@ -1057,7 +1343,8 @@ const AutoSchedule = () => {
                 </Box>
               </Grid>
             </Grid>
-          </CardContent>
+            </CardContent>
+          </Collapse>
         </Card>
       )}
 
@@ -1065,10 +1352,16 @@ const AutoSchedule = () => {
       {generatedSchedules.length > 0 && (
         <Card sx={{ mb: 3 }}>
           <CardContent>
-            <Typography variant="h6" gutterBottom>
-              <SchoolIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-              Classroom Utilization
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => toggleSection('classroomUtilization')}>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', mb: 0 }}>
+                <SchoolIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+                Classroom Utilization
+              </Typography>
+              {expandedSections.classroomUtilization ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            </Box>
+          </CardContent>
+          <Collapse in={expandedSections.classroomUtilization}>
+            <CardContent sx={{ pt: 0 }}>
             <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
               Shows how schedules are distributed across all available classrooms for optimal resource usage.
             </Typography>
@@ -1113,7 +1406,8 @@ const AutoSchedule = () => {
                 );
               })}
             </Grid>
-          </CardContent>
+            </CardContent>
+          </Collapse>
         </Card>
       )}
 
@@ -1121,10 +1415,16 @@ const AutoSchedule = () => {
       {generatedSchedules.length > 0 && (
         <Card sx={{ mb: 3 }}>
           <CardContent>
-            <Typography variant="h6" gutterBottom>
-              <PersonIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-              Teacher Workload Distribution
-            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => toggleSection('teacherWorkload')}>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', mb: 0 }}>
+                <PersonIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+                Teacher Workload Distribution
+              </Typography>
+              {expandedSections.teacherWorkload ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            </Box>
+          </CardContent>
+          <Collapse in={expandedSections.teacherWorkload}>
+            <CardContent sx={{ pt: 0 }}>
             <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
               Shows how schedules are distributed across all teachers for balanced workload.
             </Typography>
@@ -1177,7 +1477,8 @@ const AutoSchedule = () => {
                 );
               })}
             </Grid>
-          </CardContent>
+            </CardContent>
+          </Collapse>
         </Card>
       )}
 
@@ -1272,6 +1573,24 @@ const AutoSchedule = () => {
           </CardContent>
         </Card>
       )}
+
+      {/* Debug: Failed Schedules State */}
+      {console.log('🔍 Render: failedSchedules.length =', failedSchedules.length, 'failedSchedules =', failedSchedules)}
+      
+      {/* Debug Display - Remove this after testing */}
+      <Card sx={{ mb: 2, bgcolor: 'grey.100' }}>
+        <CardContent>
+          <Typography variant="body2">
+            <strong>Debug Info:</strong> Failed Schedules Count: {failedSchedules.length}
+            {failedSchedules.length > 0 && (
+              <div>
+                <strong>Failed Schedules:</strong>
+                <pre>{JSON.stringify(failedSchedules, null, 2)}</pre>
+              </div>
+            )}
+          </Typography>
+        </CardContent>
+      </Card>
 
       {/* Failed Schedules Table */}
       {failedSchedules.length > 0 && (
@@ -1421,6 +1740,123 @@ const AutoSchedule = () => {
           {success}
         </Alert>
       </Snackbar>
+
+      {/* School Year Selection Dialog */}
+      <Dialog open={showSchoolYearDialog} onClose={() => setShowSchoolYearDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          Select School Year
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Choose which school year the generated schedules will belong to:
+          </Typography>
+          
+          {schoolYears.map((schoolYear) => (
+            <Box
+              key={schoolYear.id}
+              sx={{
+                p: 2,
+                mb: 1,
+                border: selectedSchoolYear === schoolYear.id ? '2px solid #1976d2' : '1px solid #e0e0e0',
+                borderRadius: 1,
+                cursor: 'pointer',
+                bgcolor: selectedSchoolYear === schoolYear.id ? 'primary.light' : 'background.paper',
+                '&:hover': {
+                  bgcolor: selectedSchoolYear === schoolYear.id ? 'primary.light' : 'action.hover',
+                }
+              }}
+              onClick={() => setSelectedSchoolYear(schoolYear.id)}
+            >
+              <Typography variant="h6" fontWeight="medium">
+                {schoolYear.name}
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                {schoolYear.description || 'No description'}
+              </Typography>
+              <Typography variant="caption" color="textSecondary">
+                {new Date(schoolYear.startDate).toLocaleDateString()} - {new Date(schoolYear.endDate).toLocaleDateString()}
+              </Typography>
+              {schoolYear.isActive && (
+                <Chip label="Active" color="success" size="small" sx={{ ml: 1 }} />
+              )}
+            </Box>
+          ))}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowSchoolYearDialog(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              setShowSchoolYearDialog(false);
+              if (selectedSchoolYear) {
+                generateSchedule();
+              }
+            }}
+            variant="contained"
+            disabled={!selectedSchoolYear}
+          >
+            Generate Schedule
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete School Year Schedules Dialog */}
+      <Dialog open={showDeleteSchoolYearDialog} onClose={() => setShowDeleteSchoolYearDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          Delete Schedules by School Year
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+            Select a school year to delete all schedules from that year. This action cannot be undone.
+          </Typography>
+          
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+            <Typography variant="subtitle2" fontWeight="medium">
+              Select School Year to Delete:
+            </Typography>
+            <Select
+              value={deleteSelectedSchoolYear || ''}
+              onChange={(e) => setDeleteSelectedSchoolYear(e.target.value)}
+              displayEmpty
+              fullWidth
+            >
+              <MenuItem value="">
+                <em>Select School Year</em>
+              </MenuItem>
+              {schoolYears.map((schoolYear) => (
+                <MenuItem key={schoolYear.id} value={schoolYear.id}>
+                  {schoolYear.name} {schoolYear.isActive && '(Active)'}
+                </MenuItem>
+              ))}
+            </Select>
+            
+            {deleteSelectedSchoolYear && (
+              <Alert severity="warning" sx={{ mt: 2 }}>
+                <Typography variant="body2">
+                  ⚠️ This will delete ALL schedules for "{schoolYears.find(sy => sy.id === deleteSelectedSchoolYear)?.name}". 
+                  This action cannot be undone.
+                </Typography>
+              </Alert>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowDeleteSchoolYearDialog(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleDeleteSchedulesBySchoolYear}
+            variant="contained"
+            color="error"
+            disabled={!deleteSelectedSchoolYear || loading}
+            startIcon={<DeleteIcon />}
+          >
+            {loading ? 'Deleting...' : 'Delete Schedules'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
     </Box>
   );
 };

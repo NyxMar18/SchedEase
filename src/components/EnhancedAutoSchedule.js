@@ -152,18 +152,6 @@ const EnhancedAutoSchedule = () => {
     }
   };
 
-  const clearSchedule = async () => {
-    try {
-      setLoading(true);
-      setGeneratedSchedules([]);
-      setSchedulingResult(null);
-      setSuccess('Schedule cleared from display');
-    } catch (error) {
-      setError('Failed to clear schedule');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const deleteAllSchedules = async () => {
     if (!window.confirm('Are you sure you want to delete ALL generated schedules? This action cannot be undone.')) {
@@ -321,13 +309,6 @@ const EnhancedAutoSchedule = () => {
           disabled={loading || !validation.isValid}
         >
           Generate Optimized Schedule
-        </Button>
-        <Button
-          variant="outlined"
-          onClick={clearSchedule}
-          disabled={generatedSchedules.length === 0}
-        >
-          Clear Schedule
         </Button>
         <Button
           variant="outlined"

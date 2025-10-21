@@ -3,6 +3,7 @@ package com.scheduling.repository;
 import com.scheduling.model.Classroom;
 import com.scheduling.model.DayOfWeek;
 import com.scheduling.model.Schedule;
+import com.scheduling.model.SchoolYear;
 import com.scheduling.model.Teacher;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -23,6 +24,8 @@ public interface ScheduleRepository extends JpaRepository<Schedule, Long> {
     List<Schedule> findByDate(LocalDate date);
     
     List<Schedule> findByDayOfWeek(DayOfWeek dayOfWeek);
+    
+    List<Schedule> findBySchoolYear(SchoolYear schoolYear);
     
     @Query("SELECT s FROM Schedule s WHERE s.classroom = :classroom AND s.date = :date " +
            "AND ((s.startTime <= :startTime AND s.endTime > :startTime) OR " +

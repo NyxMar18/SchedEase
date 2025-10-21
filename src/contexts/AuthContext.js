@@ -36,17 +36,14 @@ export const AuthProvider = ({ children }) => {
       const { userAPI } = await import('../services/userService');
       const loginResult = await userAPI.login(email, password);
       
-      console.log('📊 Login result:', loginResult);
-      
       if (loginResult.success) {
-        console.log('✅ Login successful, setting user:', loginResult.user);
+        console.log('✅ Login successful:', loginResult.user.role);
         setUser(loginResult.user);
         localStorage.setItem('user', JSON.stringify(loginResult.user));
-        console.log('💾 User saved to localStorage');
         return loginResult;
       }
       
-      console.log('❌ Login failed:', loginResult.message);
+      console.log('❌ Login failed');
       // If database login fails, return the error
       return loginResult;
     } catch (error) {

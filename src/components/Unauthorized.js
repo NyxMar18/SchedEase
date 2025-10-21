@@ -20,17 +20,17 @@ const Unauthorized = () => {
 
   const handleGoHome = () => {
     if (user?.role === 'admin') {
-      navigate('/');
+      navigate('/dashboard');
     } else if (user?.role === 'teacher') {
       navigate('/schedule-viewer');
     } else {
-      navigate('/login');
+      navigate('/');
     }
   };
 
   const handleLogout = () => {
     logout();
-    navigate('/login');
+    navigate('/');
   };
 
   return (

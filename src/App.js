@@ -9,10 +9,12 @@ import ClassroomManagement from './components/ClassroomManagement';
 import SectionManagement from './components/SectionManagement';
 import TeacherManagement from './components/TeacherManagement';
 import SubjectManagement from './components/SubjectManagement';
+import SchoolYearManagement from './components/SchoolYearManagement';
 import AutoSchedule from './components/AutoSchedule';
 import ScheduleViewer from './components/ScheduleViewer';
 import FirebaseTest from './components/FirebaseTest';
 import Login from './components/Login';
+import AppLandingPage from './components/AppLandingPage';
 import Unauthorized from './components/Unauthorized';
 import AdminAccountRecovery from './components/AdminAccountRecovery';
 import ProtectedRoute from './components/ProtectedRoutes';
@@ -33,17 +35,17 @@ const theme = createTheme({
 });
 
 const AppRoutes = () => {
-  const { user } = useAuth();
 
   return (
     <Routes>
       {/* Public Routes */}
+      <Route path="/" element={<AppLandingPage />} />
       <Route path="/login" element={<Login />} />
       <Route path="/unauthorized" element={<Unauthorized />} />
       <Route path="/admin-recovery" element={<AdminAccountRecovery />} />
       
       {/* Protected Routes */}
-      <Route path="/" element={
+      <Route path="/dashboard" element={
         <ProtectedRoute>
           <Layout>
             <Dashboard />
@@ -83,6 +85,14 @@ const AppRoutes = () => {
         </ProtectedRoute>
       } />
       
+      <Route path="/school-years" element={
+        <ProtectedRoute requiredRole="admin">
+          <Layout>
+            <SchoolYearManagement />
+          </Layout>
+        </ProtectedRoute>
+      } />
+      
       <Route path="/auto-schedule" element={
         <ProtectedRoute requiredRole="admin">
           <Layout>
@@ -107,8 +117,8 @@ const AppRoutes = () => {
         </ProtectedRoute>
       } />
       
-      {/* Catch all route - redirect to login */}
-      <Route path="*" element={<Navigate to="/login" replace />} />
+      {/* Catch all route - redirect to landing page */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 };

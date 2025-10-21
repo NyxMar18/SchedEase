@@ -51,6 +51,13 @@ import {
 import { scheduleAPI, classroomAPI, teacherAPI } from '../services/api';
 import { sectionFirestoreAPI } from '../firebase/sectionFirestoreService';
 import { useAuth } from '../contexts/AuthContext';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, collection, getDocs, query, orderBy } from 'firebase/firestore';
+import firebaseConfig from '../firebase/config';
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
 const ScheduleViewer = () => {
   const { user, isAdmin, isTeacher } = useAuth();
@@ -62,11 +69,49 @@ const ScheduleViewer = () => {
     isAdmin: isAdmin(),
     isTeacher: isTeacher()
   });
+
+  // Helper function to filter schedules for teachers
+  const filterSchedulesForTeacher = (schedules) => {
+    let filteredSchedules = schedules;
+    
+    // Filter by school year first (for both teachers and admins)
+    if (selectedSchoolYear) {
+      filteredSchedules = filteredSchedules.filter(schedule => 
+        schedule.schoolYearId === selectedSchoolYear
+      );
+    }
+    
+    // Then filter by teacher if user is a teacher
+    if (isTeacher() && user?.teacherId) {
+      filteredSchedules = filteredSchedules.filter(schedule => {
+        const scheduleTeacher = schedule.teacher;
+        if (!scheduleTeacher) return false;
+        
+        // Method 1: Direct ID match
+        if (scheduleTeacher.id === user.teacherId) return true;
+        
+        // Method 2: If schedule.teacher is a user object, check user.teacherId
+        if (scheduleTeacher.teacherId === user.teacherId) return true;
+        
+        // Method 3: If schedule.teacher is the user object itself (same ID)
+        if (scheduleTeacher.id === user.id) return true;
+        
+        // Method 4: Check if the teacher's email matches the user's email
+        if (scheduleTeacher.email === user.email) return true;
+        
+        return false;
+      });
+    }
+    
+    return filteredSchedules;
+  };
   const [schedules, setSchedules] = useState([]);
   const [filteredSchedules, setFilteredSchedules] = useState([]);
   const [classrooms, setClassrooms] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [sections, setSections] = useState([]);
+  const [schoolYears, setSchoolYears] = useState([]);
+  const [selectedSchoolYear, setSelectedSchoolYear] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -117,6 +162,28 @@ const ScheduleViewer = () => {
   const [dragOverSlot, setDragOverSlot] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
 
+  // Fetch school years from Firebase
+  const fetchSchoolYears = async () => {
+    try {
+      const schoolYearsRef = collection(db, 'schoolYears');
+      const q = query(schoolYearsRef, orderBy('name', 'desc'));
+      const querySnapshot = await getDocs(q);
+      const schoolYears = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setSchoolYears(schoolYears);
+      
+      // Set active school year as default if available
+      const activeSchoolYear = schoolYears.find(sy => sy.isActive);
+      if (activeSchoolYear) {
+        setSelectedSchoolYear(activeSchoolYear.id);
+      }
+    } catch (error) {
+      console.error('Error fetching school years:', error);
+    }
+  };
+
   // Load all data
   useEffect(() => {
     const fetchData = async () => {
@@ -127,13 +194,12 @@ const ScheduleViewer = () => {
         const schedulesRes = await scheduleAPI.getAll();
         let allSchedules = schedulesRes.data;
         
-        // If user is a teacher, filter schedules to only show their own
+        // Filter schedules for teachers
+        allSchedules = filterSchedulesForTeacher(allSchedules);
+        
         if (isTeacher() && user?.teacherId) {
-          allSchedules = allSchedules.filter(schedule => {
-            // Check if the schedule's teacher ID matches the logged-in teacher's ID
-            return schedule.teacher?.id === user.teacherId;
-          });
-          console.log(`👨‍🏫 Teacher ${user.name} (ID: ${user.teacherId}) - Filtered to ${allSchedules.length} schedules`);
+          console.log(`👨‍🏫 Teacher ${user.name} (teacherId: ${user.teacherId}, userId: ${user.id}) - Filtered to ${allSchedules.length} schedules`);
+          console.log('🔍 Sample schedule teacher structure:', allSchedules[0]?.teacher);
         }
         
         setSchedules(allSchedules);
@@ -174,6 +240,7 @@ const ScheduleViewer = () => {
 
     if (user) {
       fetchData();
+      fetchSchoolYears();
     }
   }, [user, isTeacher, isAdmin]);
 
@@ -181,6 +248,13 @@ const ScheduleViewer = () => {
   // Apply filters
   useEffect(() => {
     let filtered = [...schedules];
+
+    // Apply school year filter first
+    if (selectedSchoolYear) {
+      filtered = filtered.filter(schedule => 
+        schedule.schoolYearId === selectedSchoolYear
+      );
+    }
 
     // Apply search term
     if (searchTerm) {
@@ -233,7 +307,7 @@ const ScheduleViewer = () => {
     }
 
     setFilteredSchedules(filtered);
-  }, [schedules, filterType, selectedClassroom, selectedTeacher, selectedSection, searchTerm]);
+  }, [schedules, filterType, selectedClassroom, selectedTeacher, selectedSection, searchTerm, selectedSchoolYear]);
 
   const handleFilterTypeChange = (event) => {
     setFilterType(event.target.value);
@@ -247,7 +321,12 @@ const ScheduleViewer = () => {
     try {
       setLoading(true);
       const schedulesRes = await scheduleAPI.getAll();
-      setSchedules(schedulesRes.data);
+      let allSchedules = schedulesRes.data;
+      
+      // Apply teacher filtering
+      allSchedules = filterSchedulesForTeacher(allSchedules);
+      
+      setSchedules(allSchedules);
       setError(null);
     } catch (err) {
       console.error('Error refreshing schedules:', err);
@@ -408,11 +487,7 @@ const ScheduleViewer = () => {
       const schedulesRes = await scheduleAPI.getAll();
       let allSchedules = schedulesRes.data;
       
-      if (isTeacher() && user?.teacherId) {
-        allSchedules = allSchedules.filter(schedule => {
-          return schedule.teacher?.id === user.teacherId;
-        });
-      }
+      allSchedules = filterSchedulesForTeacher(allSchedules);
       
       setSchedules(allSchedules);
       setEditDialogOpen(false);
@@ -509,11 +584,7 @@ const ScheduleViewer = () => {
       const schedulesRes = await scheduleAPI.getAll();
       let allSchedules = schedulesRes.data;
       
-      if (isTeacher() && user?.teacherId) {
-        allSchedules = allSchedules.filter(schedule => {
-          return schedule.teacher?.id === user.teacherId;
-        });
-      }
+      allSchedules = filterSchedulesForTeacher(allSchedules);
       
       setSchedules(allSchedules);
       setAddDialogOpen(false);
@@ -561,11 +632,7 @@ const ScheduleViewer = () => {
       const schedulesRes = await scheduleAPI.getAll();
       let allSchedules = schedulesRes.data;
       
-      if (isTeacher() && user?.teacherId) {
-        allSchedules = allSchedules.filter(schedule => {
-          return schedule.teacher?.id === user.teacherId;
-        });
-      }
+      allSchedules = filterSchedulesForTeacher(allSchedules);
       
       setSchedules(allSchedules);
       setDeleteDialogOpen(false);
@@ -655,11 +722,7 @@ const ScheduleViewer = () => {
       const schedulesRes = await scheduleAPI.getAll();
       let allSchedules = schedulesRes.data;
       
-      if (isTeacher() && user?.teacherId) {
-        allSchedules = allSchedules.filter(schedule => {
-          return schedule.teacher?.id === user.teacherId;
-        });
-      }
+      allSchedules = filterSchedulesForTeacher(allSchedules);
       
       setSchedules(allSchedules);
       setSuccessMessage('Schedule moved successfully!');
@@ -809,7 +872,7 @@ const ScheduleViewer = () => {
 
       <Typography variant="subtitle1" color="textSecondary" gutterBottom>
         {isTeacher() 
-          ? `Viewing your personal schedule for ${user?.name || 'Teacher'}`
+          ? `Welcome ${user?.name || 'Teacher'}`
           : 'View and filter schedules by classroom, teacher, or section'
         }
       </Typography>
@@ -817,9 +880,7 @@ const ScheduleViewer = () => {
       {/* Debug info - remove this after testing */}
       <Alert severity="info" sx={{ mb: 2 }}>
         <Typography variant="body2">
-          Debug Info: User Role = {user?.role || 'Not logged in'}, 
-          isAdmin = {isAdmin() ? 'Yes' : 'No'}, 
-          isTeacher = {isTeacher() ? 'Yes' : 'No'}
+         Log in as = {user?.role || 'Not logged in'}
         </Typography>
       </Alert>
 
@@ -917,6 +978,26 @@ const ScheduleViewer = () => {
                 </FormControl>
               </Grid>
             )}
+            {/* School Year Selection for Admins */}
+            <Grid item xs={12} sm={6} md={3}>
+              <FormControl fullWidth>
+                <InputLabel>School Year</InputLabel>
+                <Select
+                  value={selectedSchoolYear}
+                  label="School Year"
+                  onChange={(e) => setSelectedSchoolYear(e.target.value)}
+                >
+                  <MenuItem value="">
+                    <em>All School Years</em>
+                  </MenuItem>
+                  {schoolYears.map((schoolYear) => (
+                    <MenuItem key={schoolYear.id} value={schoolYear.id}>
+                      {schoolYear.name} {schoolYear.isActive && '(Active)'}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
           </Grid>
         </CardContent>
       </Card>
@@ -947,6 +1028,25 @@ const ScheduleViewer = () => {
                   placeholder="Search by subject, classroom, section..."
                 />
               </Grid>
+              <Grid item xs={12} sm={6} md={4}>
+                <FormControl fullWidth>
+                  <InputLabel>School Year</InputLabel>
+                  <Select
+                    value={selectedSchoolYear}
+                    label="School Year"
+                    onChange={(e) => setSelectedSchoolYear(e.target.value)}
+                  >
+                    <MenuItem value="">
+                      <em>All School Years</em>
+                    </MenuItem>
+                    {schoolYears.map((schoolYear) => (
+                      <MenuItem key={schoolYear.id} value={schoolYear.id}>
+                        {schoolYear.name} {schoolYear.isActive && '(Active)'}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
             </Grid>
           </CardContent>
         </Card>
@@ -956,6 +1056,9 @@ const ScheduleViewer = () => {
       <Box mb={2}>
         <Typography variant="h6">
           Showing {filteredSchedules.length} of {schedules.length} schedules
+          {selectedSchoolYear && (
+            <span> for <strong>{schoolYears.find(sy => sy.id === selectedSchoolYear)?.name || 'Selected School Year'}</strong></span>
+          )}
         </Typography>
         
         {/* Subject Mismatch Warning - Only for admins */}

@@ -8,7 +8,8 @@ import {
   where, 
   doc, 
   updateDoc,
-  deleteDoc 
+  deleteDoc,
+  getDoc
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase/config';
 
@@ -140,9 +141,24 @@ export const userAPI = {
   },
 
   // Change password
-  changePassword: async (userId, newPassword) => {
+  changePassword: async (userId, currentPassword, newPassword) => {
     try {
+      // First, get the user to validate current password
       const userRef = doc(db, 'users', userId);
+      const userDoc = await getDoc(userRef);
+      
+      if (!userDoc.exists()) {
+        return { success: false, message: 'User not found' };
+      }
+      
+      const userData = userDoc.data();
+      
+      // Validate current password
+      if (userData.password !== currentPassword) {
+        return { success: false, message: 'Current password is incorrect' };
+      }
+      
+      // Update with new password
       await updateDoc(userRef, { password: newPassword });
       return { success: true };
     } catch (error) {

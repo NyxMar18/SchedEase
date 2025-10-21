@@ -6,12 +6,7 @@ import { Box, CircularProgress, Typography } from '@mui/material';
 const ProtectedRoute = ({ children, requiredRole = null }) => {
   const { user, loading } = useAuth();
 
-  console.log('🛡️ ProtectedRoute check:', { 
-    user: user?.email, 
-    role: user?.role, 
-    requiredRole, 
-    loading 
-  });
+  console.log('🛡️ ProtectedRoute check:', user?.role || 'no user');
 
   if (loading) {
     console.log('⏳ ProtectedRoute: Loading...');
@@ -33,11 +28,11 @@ const ProtectedRoute = ({ children, requiredRole = null }) => {
 
   if (!user) {
     console.log('❌ ProtectedRoute: No user, redirecting to login');
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/" replace />;
   }
 
   if (requiredRole && user.role !== requiredRole) {
-    console.log('🚫 ProtectedRoute: Role mismatch, redirecting to unauthorized');
+    console.log('🚫 ProtectedRoute: Role mismatch');
     return <Navigate to="/unauthorized" replace />;
   }
 
