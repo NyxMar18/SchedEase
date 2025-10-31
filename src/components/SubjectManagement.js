@@ -50,23 +50,25 @@ const SubjectManagement = () => {
   const categories = [
     'Mathematics',
     'Science',
-    'Language Arts',
+    'Social Science',
     'Social Studies',
     'Physical Education',
-    'Arts',
-    'Technology',
-    'Electives'
+    'English',
+    'ABM',
+    'Filipino'
+
+  
+
   ];
 
 
   const roomTypes = [
-    'Lecture Hall',
-    'Laboratory',
+    'Chemistry Lab',
+    'Biology Lab',
+    'Physics Lab',
     'Computer Lab',
-    'Library',
-    'Auditorium',
-    'Meeting Room',
-    'Any'
+    'Lecture Room',
+    'Physical Education Area',
   ];
 
   useEffect(() => {
@@ -186,12 +188,11 @@ const SubjectManagement = () => {
     const categoryColors = {
       'Mathematics': 'primary',
       'Science': 'success',
-      'Language Arts': 'info',
-      'Social Studies': 'warning',
+      'Social Science': 'info',
       'Physical Education': 'secondary',
-      'Arts': 'error',
-      'Technology': 'default',
-      'Electives': 'primary'
+      'English': 'error',
+      'ABM': 'default',
+      'Filipino': 'primary'
     };
     
     return (
@@ -365,7 +366,6 @@ const SubjectManagement = () => {
             </Grid>
             <Grid item xs={12} sm={6}>
               <TextField
-                label="Required Room Type"
                 value={formData.requiredRoomType}
                 onChange={handleChange('requiredRoomType')}
                 fullWidth
