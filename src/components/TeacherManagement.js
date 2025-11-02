@@ -51,7 +51,7 @@ const TeacherManagement = () => {
     firstName: '',
     lastName: '',
     email: '',
-    subject: '',
+    subjects: [],
     availableStartTime: '',
     availableEndTime: '',
     availableDays: [],
@@ -88,7 +88,7 @@ const TeacherManagement = () => {
         firstName: teacher.firstName,
         lastName: teacher.lastName,
         email: teacher.email,
-        subject: teacher.subject,
+        subjects: teacher.subjects || [],
         availableStartTime: teacher.availableStartTime || '',
         availableEndTime: teacher.availableEndTime || '',
         availableDays: teacher.availableDays || [],
@@ -100,7 +100,7 @@ const TeacherManagement = () => {
         firstName: '',
         lastName: '',
         email: '',
-        subject: '',
+        subjects: [],
         availableStartTime: '',
         availableEndTime: '',
         availableDays: [],
@@ -117,7 +117,7 @@ const TeacherManagement = () => {
       firstName: '',
       lastName: '',
       email: '',
-      subject: '',
+      subjects: [],
       availableStartTime: '',
       availableEndTime: '',
       availableDays: [],
@@ -140,8 +140,12 @@ const TeacherManagement = () => {
         setError('Email is required');
         return;
       }
-      if (!formData.subject) {
-        setError('Subject is required');
+      if (!formData.subjects || formData.subjects.length === 0) {
+        setError('At least one subject is required');
+        return;
+      }
+      if (formData.subjects.length > 2) {
+        setError('A teacher can only be assigned to a maximum of 2 subjects');
         return;
       }
       if (!formData.availableStartTime.trim()) {
@@ -250,7 +254,7 @@ const TeacherManagement = () => {
                 <TableRow>
                   <TableCell>Name</TableCell>
                   <TableCell>Email</TableCell>
-                  <TableCell>Subject</TableCell>
+                  <TableCell>Subjects</TableCell>
                   <TableCell>Available Days</TableCell>
                   <TableCell>Available Time</TableCell>
                   <TableCell>Actions</TableCell>
@@ -262,7 +266,13 @@ const TeacherManagement = () => {
                     <TableCell>{teacher.firstName} {teacher.lastName}</TableCell>
                     <TableCell>{teacher.email}</TableCell>
                     <TableCell>
-                      <Chip label={teacher.subject} color="secondary" size="small" />
+                      {teacher.subjects && teacher.subjects.length > 0 ? (
+                        teacher.subjects.map(subject => (
+                          <Chip key={subject} label={subject} color="secondary" size="small" sx={{ mr: 0.5, mb: 0.5 }} />
+                        ))
+                      ) : (
+                        <Chip label={teacher.subject || 'N/A'} color="secondary" size="small" />
+                      )}
                     </TableCell>
                     <TableCell>
                       {teacher.availableDays?.map(day => (
@@ -321,21 +331,43 @@ const TeacherManagement = () => {
                   required
                 />
               </Grid>
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12}>
                 <FormControl fullWidth required>
-                  <InputLabel>Subject</InputLabel>
+                  <InputLabel>Subjects (Max 2)</InputLabel>
                   <Select
-                    value={formData.subject}
-                    onChange={handleChange('subject')}
-                    label="Subject"
+                    multiple
+                    value={formData.subjects}
+                    onChange={handleChange('subjects')}
+                    label="Subjects (Max 2)"
+                    renderValue={(selected) => (
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                        {selected.map((value) => (
+                          <Chip key={value} label={value} size="small" />
+                        ))}
+                      </Box>
+                    )}
                   >
                     {subjects.map((subject) => (
-                      <MenuItem key={subject.id} value={subject.name}>
+                      <MenuItem 
+                        key={subject.id} 
+                        value={subject.name}
+                        disabled={formData.subjects.length >= 2 && !formData.subjects.includes(subject.name)}
+                      >
                         {subject.name} ({subject.code})
                       </MenuItem>
                     ))}
                   </Select>
                 </FormControl>
+                {formData.subjects.length === 0 && (
+                  <Typography variant="caption" color="error">
+                    Please select at least one subject
+                  </Typography>
+                )}
+                {formData.subjects.length > 2 && (
+                  <Typography variant="caption" color="error">
+                    Maximum 2 subjects allowed
+                  </Typography>
+                )}
               </Grid>
               <Grid item xs={12} sm={6}>
                 <TextField

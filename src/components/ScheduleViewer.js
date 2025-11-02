@@ -694,8 +694,26 @@ const ScheduleViewer = () => {
     try {
       setLoading(true);
       
-      // Check for conflicts in the target slot
-      const conflicts = detectConflictsForSlot(targetDay, targetTimeSlot, draggedSchedule);
+      // Calculate original duration to preserve it when moving
+      const originalStart = new Date(`2000-01-01 ${draggedSchedule.startTime}`);
+      const originalEnd = new Date(`2000-01-01 ${draggedSchedule.endTime}`);
+      const durationMinutes = (originalEnd - originalStart) / (1000 * 60);
+      
+      // Calculate new end time by adding the original duration to the new start time
+      const newStart = new Date(`2000-01-01 ${targetTimeSlot.start}`);
+      const newEnd = new Date(newStart.getTime() + durationMinutes * 60 * 1000);
+      const newEndTime = `${String(newEnd.getHours()).padStart(2, '0')}:${String(newEnd.getMinutes()).padStart(2, '0')}`;
+      
+      // Create a temporary schedule with the new times for conflict detection
+      const tempScheduleForConflictCheck = {
+        ...draggedSchedule,
+        dayOfWeek: targetDay,
+        startTime: targetTimeSlot.start,
+        endTime: newEndTime
+      };
+      
+      // Check for conflicts across all slots the schedule will occupy
+      const conflicts = detectConflictsForSlot(targetDay, targetTimeSlot, tempScheduleForConflictCheck);
       
       if (conflicts.length > 0) {
         setError(`Cannot move schedule: ${conflicts.map(c => c.message).join(', ')}`);
@@ -705,12 +723,12 @@ const ScheduleViewer = () => {
         return;
       }
 
-      // Update the schedule
+      // Update the schedule while preserving duration
       const updatedSchedule = {
         ...draggedSchedule,
         dayOfWeek: targetDay,
         startTime: targetTimeSlot.start,
-        endTime: targetTimeSlot.end,
+        endTime: newEndTime,
         notes: draggedSchedule.notes ? 
           `${draggedSchedule.notes} (Moved via drag & drop)` : 
           'Moved via drag & drop'
@@ -744,37 +762,46 @@ const ScheduleViewer = () => {
     setIsDragging(false);
   };
 
-  // Helper function to detect conflicts for a specific slot
+  // Helper function to detect conflicts for a schedule being moved
   const detectConflictsForSlot = (day, timeSlot, scheduleToMove) => {
     const conflicts = [];
     
+    // Parse the schedule times
+    const scheduleStart = new Date(`2000-01-01 ${scheduleToMove.startTime}`);
+    const scheduleEnd = new Date(`2000-01-01 ${scheduleToMove.endTime}`);
+    
+    // Check for conflicts with all existing schedules that overlap with this time range
+    const overlappingSchedules = filteredSchedules.filter(schedule => {
+      if (schedule.id === scheduleToMove.id || schedule.dayOfWeek !== day) {
+        return false;
+      }
+      
+      const existingStart = new Date(`2000-01-01 ${schedule.startTime}`);
+      const existingEnd = new Date(`2000-01-01 ${schedule.endTime}`);
+      
+      // Check if schedules overlap
+      return (scheduleStart < existingEnd && scheduleEnd > existingStart);
+    });
+    
     // Check for teacher conflicts
-    const teacherConflicts = filteredSchedules.filter(schedule => 
-      schedule.id !== scheduleToMove.id &&
-      schedule.dayOfWeek === day &&
-      schedule.startTime === timeSlot.start &&
-      schedule.endTime === timeSlot.end &&
+    const teacherConflicts = overlappingSchedules.filter(schedule => 
       schedule.teacher?.id === scheduleToMove.teacher?.id
     );
     
     if (teacherConflicts.length > 0) {
       conflicts.push({
-        message: `Teacher ${scheduleToMove.teacher?.firstName} ${scheduleToMove.teacher?.lastName} is already scheduled at this time`
+        message: `Teacher ${scheduleToMove.teacher?.firstName} ${scheduleToMove.teacher?.lastName} is already scheduled during this time`
       });
     }
     
     // Check for classroom conflicts
-    const classroomConflicts = filteredSchedules.filter(schedule => 
-      schedule.id !== scheduleToMove.id &&
-      schedule.dayOfWeek === day &&
-      schedule.startTime === timeSlot.start &&
-      schedule.endTime === timeSlot.end &&
+    const classroomConflicts = overlappingSchedules.filter(schedule => 
       schedule.classroom?.id === scheduleToMove.classroom?.id
     );
     
     if (classroomConflicts.length > 0) {
       conflicts.push({
-        message: `Classroom ${scheduleToMove.classroom?.roomName} is already occupied at this time`
+        message: `Classroom ${scheduleToMove.classroom?.roomName} is already occupied during this time`
       });
     }
     
@@ -953,7 +980,7 @@ const ScheduleViewer = () => {
                   >
                     {teachers.map((teacher) => (
                       <MenuItem key={teacher.id} value={teacher.id}>
-                        {teacher.firstName} {teacher.lastName} ({teacher.subject})
+                        {teacher.firstName} {teacher.lastName} ({teacher.subjects && teacher.subjects.length > 0 ? teacher.subjects.join(', ') : teacher.subject || 'N/A'})
                       </MenuItem>
                     ))}
                   </Select>
@@ -1128,8 +1155,8 @@ const ScheduleViewer = () => {
                       <Typography variant="body2" fontWeight="medium">
                         {schedule.subject || 'N/A'}
                       </Typography>
-                      {schedule.teacher && schedule.subject !== schedule.teacher.subject && (
-                        <Tooltip title={`⚠️ Warning: Teacher's subject is "${schedule.teacher.subject}" but assigned to teach "${schedule.subject}"`}>
+                      {schedule.teacher && schedule.teacher.subjects && schedule.teacher.subjects.length > 0 && !schedule.teacher.subjects.includes(schedule.subject) && (
+                        <Tooltip title={`⚠️ Warning: Teacher's subjects are "${schedule.teacher.subjects.join(', ')}" but assigned to teach "${schedule.subject}"`}>
                           <Chip 
                             label="⚠️" 
                             size="small" 
@@ -1145,7 +1172,12 @@ const ScheduleViewer = () => {
                       <Typography variant="body2" fontWeight="medium">
                         {schedule.teacher ? `${schedule.teacher.firstName || ''} ${schedule.teacher.lastName || ''}`.trim() : 'N/A'}
                     </Typography>
-                    {schedule.teacher?.subject && (
+                    {schedule.teacher?.subjects && schedule.teacher.subjects.length > 0 && (
+                      <Typography variant="caption" color="textSecondary">
+                        ({schedule.teacher.subjects.join(', ')})
+                      </Typography>
+                    )}
+                    {schedule.teacher?.subject && !schedule.teacher?.subjects && (
                       <Typography variant="caption" color="textSecondary">
                         ({schedule.teacher.subject})
                       </Typography>
@@ -1230,14 +1262,22 @@ const ScheduleViewer = () => {
           )}
           {(() => {
             const daysOfWeek = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
+            // 30-minute time slots to support 1.5 hour schedules
             const timeSlots = [
-              { start: '08:00', end: '09:00' },
-              { start: '09:00', end: '10:00' },
-              { start: '10:00', end: '11:00' },
-              { start: '11:00', end: '12:00' },
-              { start: '13:00', end: '14:00' },
-              { start: '14:00', end: '15:00' },
-              { start: '15:00', end: '16:00' },
+              { start: '08:00', end: '08:30' },
+              { start: '08:30', end: '09:00' },
+              { start: '09:00', end: '09:30' },
+              { start: '09:30', end: '10:00' },
+              { start: '10:00', end: '10:30' },
+              { start: '10:30', end: '11:00' },
+              { start: '11:00', end: '11:30' },
+              { start: '11:30', end: '12:00' },
+              { start: '13:00', end: '13:30' },
+              { start: '13:30', end: '14:00' },
+              { start: '14:00', end: '14:30' },
+              { start: '14:30', end: '15:00' },
+              { start: '15:00', end: '15:30' },
+              { start: '15:30', end: '16:00' },
             ];
 
             return (
@@ -1264,19 +1304,32 @@ const ScheduleViewer = () => {
                           </Typography>
                         </TableCell>
                         {daysOfWeek.map(day => {
+                          // Find schedule for this exact time slot (each slot is now an individual schedule)
                           const scheduleForSlot = filteredSchedules.find(schedule => 
                             schedule.dayOfWeek === day && 
                             schedule.startTime === timeSlot.start &&
                             schedule.endTime === timeSlot.end
                           );
                           
+                          // Calculate duration text
+                          let durationText = '';
+                          if (scheduleForSlot) {
+                            const startTime = new Date(`2000-01-01 ${scheduleForSlot.startTime}`);
+                            const endTime = new Date(`2000-01-01 ${scheduleForSlot.endTime}`);
+                            const durationMinutes = (endTime - startTime) / (1000 * 60);
+                            durationText = durationMinutes >= 60 ? 
+                              ` (${(durationMinutes / 60).toFixed(1)}h)` : 
+                              ` (${durationMinutes}min)`;
+                          }
+                          
                           const isDragOver = dragOverSlot && 
                             dragOverSlot.day === day && 
                             dragOverSlot.timeSlot.start === timeSlot.start;
                           
+                          // Check if this slot's schedule is being dragged
                           const isBeingDragged = draggedSchedule && 
-                            draggedSchedule.dayOfWeek === day && 
-                            draggedSchedule.startTime === timeSlot.start;
+                            scheduleForSlot && 
+                            draggedSchedule.id === scheduleForSlot.id;
                           
                           return (
                             <TableCell 
@@ -1297,6 +1350,7 @@ const ScheduleViewer = () => {
                                   draggable={isAdmin()}
                                   onDragStart={(e) => handleDragStart(e, scheduleForSlot)}
                                   onDragEnd={handleDragEnd}
+                                  onDoubleClick={() => isAdmin() && handleEditSchedule(scheduleForSlot)}
                                   sx={{ 
                                     p: 1, 
                                     bgcolor: isBeingDragged ? 'primary.main' : 'primary.light', 
@@ -1319,11 +1373,12 @@ const ScheduleViewer = () => {
                                   }}
                                 >
                                   <Typography variant="caption" fontWeight="bold">
-                                    {scheduleForSlot.subject}
+                                    {scheduleForSlot.subject || 'N/A'}
+                                    {durationText}
                                   </Typography>
                                   <Typography variant="caption" display="block">
                                     {scheduleForSlot.teacher ? 
-                                      `${scheduleForSlot.teacher.firstName} ${scheduleForSlot.teacher.lastName}` : 
+                                      `${scheduleForSlot.teacher.firstName || ''} ${scheduleForSlot.teacher.lastName || ''}`.trim() : 
                                       'N/A'
                                     }
                                   </Typography>
@@ -1338,7 +1393,7 @@ const ScheduleViewer = () => {
                                   </Typography>
                                   {isAdmin() && (
                                     <Typography variant="caption" display="block" sx={{ mt: 0.5, fontStyle: 'italic' }}>
-                                      Drag to move
+                                      Drag to move • Double-click to edit
                                     </Typography>
                                   )}
                                 </Card>
@@ -1445,7 +1500,7 @@ const ScheduleViewer = () => {
                 >
                   {teachers.map((teacher) => (
                     <MenuItem key={teacher.id} value={teacher.id}>
-                      {teacher.firstName} {teacher.lastName} ({teacher.subject})
+                      {teacher.firstName} {teacher.lastName} ({teacher.subjects && teacher.subjects.length > 0 ? teacher.subjects.join(', ') : teacher.subject || 'N/A'})
                     </MenuItem>
                   ))}
                 </Select>
@@ -1637,7 +1692,7 @@ const ScheduleViewer = () => {
                 >
                   {teachers.map((teacher) => (
                     <MenuItem key={teacher.id} value={teacher.id}>
-                      {teacher.firstName} {teacher.lastName} ({teacher.subject})
+                      {teacher.firstName} {teacher.lastName} ({teacher.subjects && teacher.subjects.length > 0 ? teacher.subjects.join(', ') : teacher.subject || 'N/A'})
                     </MenuItem>
                   ))}
                 </Select>

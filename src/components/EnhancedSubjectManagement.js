@@ -26,6 +26,8 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Checkbox,
+  ListItemText,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -49,7 +51,7 @@ const EnhancedSubjectManagement = () => {
     name: '',
     code: '',
     durationPerWeek: '',
-    requiredRoomType: '',
+    requiredRoomTypes: [],
     priority: '',
     description: '',
   });
@@ -87,11 +89,28 @@ const EnhancedSubjectManagement = () => {
   const handleOpenDialog = (subject = null) => {
     setEditingSubject(subject);
     if (subject) {
+      // Handle backward compatibility: convert to array of objects with duration
+      let roomTypes = [];
+      if (subject.requiredRoomTypes && Array.isArray(subject.requiredRoomTypes)) {
+        // Check if it's already in new format (array of objects) or old format (array of strings)
+        if (subject.requiredRoomTypes.length > 0 && typeof subject.requiredRoomTypes[0] === 'object') {
+          roomTypes = subject.requiredRoomTypes;
+        } else {
+          // Old format: array of strings - distribute duration evenly
+          const totalDuration = parseInt(subject.durationPerWeek) || 1;
+          const perType = totalDuration / subject.requiredRoomTypes.length;
+          roomTypes = subject.requiredRoomTypes.map(type => ({ type, duration: perType }));
+        }
+      } else if (subject.requiredRoomType) {
+        // Old format: single string
+        roomTypes = [{ type: subject.requiredRoomType, duration: parseInt(subject.durationPerWeek) || 1 }];
+      }
+      
       setFormData({
         name: subject.name || '',
         code: subject.code || '',
         durationPerWeek: subject.durationPerWeek || '',
-        requiredRoomType: subject.requiredRoomType || '',
+        requiredRoomTypes: roomTypes,
         priority: subject.priority || '',
         description: subject.description || '',
       });
@@ -100,7 +119,7 @@ const EnhancedSubjectManagement = () => {
         name: '',
         code: '',
         durationPerWeek: '',
-        requiredRoomType: '',
+        requiredRoomTypes: [],
         priority: '',
         description: '',
       });
@@ -115,7 +134,7 @@ const EnhancedSubjectManagement = () => {
       name: '',
       code: '',
       durationPerWeek: '',
-      requiredRoomType: '',
+      requiredRoomTypes: [],
       priority: '',
       description: '',
     });
@@ -125,10 +144,22 @@ const EnhancedSubjectManagement = () => {
     try {
       setLoading(true);
       
+      // Validate that sum of durations matches total duration
+      const totalRoomTypeDuration = (formData.requiredRoomTypes || []).reduce((sum, rt) => sum + (parseFloat(rt.duration) || 0), 0);
+      const totalDuration = parseFloat(formData.durationPerWeek) || 0;
+      
+      if (formData.requiredRoomTypes && formData.requiredRoomTypes.length > 0 && 
+          Math.abs(totalRoomTypeDuration - totalDuration) > 0.01) {
+        setError(`Sum of room type durations (${totalRoomTypeDuration.toFixed(1)}h) must equal total duration (${totalDuration}h)`);
+        setLoading(false);
+        return;
+      }
+      
       const subjectData = {
         ...formData,
         durationPerWeek: parseInt(formData.durationPerWeek),
         priority: parseInt(formData.priority),
+        requiredRoomTypes: formData.requiredRoomTypes || [],
       };
 
       let result;
@@ -270,7 +301,14 @@ const EnhancedSubjectManagement = () => {
                 <Typography variant="h6">Room Types</Typography>
               </Box>
               <Typography variant="h4" color="info">
-                {new Set(subjects.map(s => s.requiredRoomType)).size}
+                {new Set(subjects.flatMap(s => {
+                  if (s.requiredRoomTypes && Array.isArray(s.requiredRoomTypes)) {
+                    return s.requiredRoomTypes;
+                  } else if (s.requiredRoomType) {
+                    return [s.requiredRoomType];
+                  }
+                  return [];
+                })).size}
               </Typography>
             </CardContent>
           </Card>
@@ -338,12 +376,38 @@ const EnhancedSubjectManagement = () => {
                         </Box>
                       </TableCell>
                       <TableCell>
-                        <Chip
-                          label={subject.requiredRoomType}
-                          color={getRoomTypeColor(subject.requiredRoomType)}
-                          size="small"
-                          variant="outlined"
-                        />
+                        {(() => {
+                          // Handle backward compatibility
+                          let roomTypes = [];
+                          if (subject.requiredRoomTypes && Array.isArray(subject.requiredRoomTypes)) {
+                            if (subject.requiredRoomTypes.length > 0 && typeof subject.requiredRoomTypes[0] === 'object') {
+                              roomTypes = subject.requiredRoomTypes;
+                            } else {
+                              // Old format: array of strings
+                              roomTypes = subject.requiredRoomTypes.map(type => ({ type, duration: null }));
+                            }
+                          } else if (subject.requiredRoomType) {
+                            roomTypes = [{ type: subject.requiredRoomType, duration: subject.durationPerWeek }];
+                          }
+                          
+                          if (roomTypes.length === 0) {
+                            return <Chip label="Any" color={getRoomTypeColor('Any')} size="small" variant="outlined" />;
+                          }
+                          
+                          return (
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                              {roomTypes.map((rt, idx) => (
+                                <Chip
+                                  key={idx}
+                                  label={rt.duration ? `${rt.type} (${rt.duration}h)` : rt.type || rt}
+                                  color={getRoomTypeColor(rt.type || rt)}
+                                  size="small"
+                                  variant="outlined"
+                                />
+                              ))}
+                            </Box>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell>
                         <Chip
@@ -416,24 +480,83 @@ const EnhancedSubjectManagement = () => {
                 value={formData.durationPerWeek}
                 onChange={(e) => setFormData(prev => ({ ...prev, durationPerWeek: e.target.value }))}
                 required
-                inputProps={{ min: 1, max: 20 }}
-                helperText="Number of hours this subject should be taught per week"
+                inputProps={{ min: 0.5, max: 20, step: 0.5 }}
+                helperText="Total hours for all room types combined"
               />
             </Grid>
-            <Grid item xs={12} sm={6}>
+            <Grid item xs={12}>
               <FormControl fullWidth required>
-                <InputLabel>Required Room Type</InputLabel>
-                <Select
-                  value={formData.requiredRoomType}
-                  label="Required Room Type"
-                  onChange={(e) => setFormData(prev => ({ ...prev, requiredRoomType: e.target.value }))}
-                >
-                  {roomTypes.map((type) => (
-                    <MenuItem key={type} value={type}>
-                      {type}
-                    </MenuItem>
-                  ))}
-                </Select>
+                <InputLabel>Required Room Types with Durations</InputLabel>
+                <Typography variant="caption" color="textSecondary" sx={{ mb: 1, display: 'block' }}>
+                  Select room types and specify duration for each. Total must equal Duration Per Week.
+                </Typography>
+                <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 2, maxHeight: 300, overflowY: 'auto' }}>
+                  {roomTypes.map((type) => {
+                    const existing = formData.requiredRoomTypes?.find(rt => rt.type === type);
+                    const isSelected = !!existing;
+                    
+                    return (
+                      <Box key={type} sx={{ mb: 2, p: 1.5, border: 1, borderColor: isSelected ? 'primary.main' : 'divider', borderRadius: 1 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', mb: isSelected ? 1 : 0 }}>
+                          <Checkbox
+                            checked={isSelected}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                // Add room type with default duration
+                                const currentCount = (formData.requiredRoomTypes?.length || 0) + 1;
+                                const defaultDuration = formData.durationPerWeek 
+                                  ? (parseFloat(formData.durationPerWeek) / currentCount).toFixed(1)
+                                  : '1';
+                                setFormData(prev => ({
+                                  ...prev,
+                                  requiredRoomTypes: [...(prev.requiredRoomTypes || []), { type, duration: defaultDuration }],
+                                }));
+                              } else {
+                                // Remove room type
+                                setFormData(prev => ({
+                                  ...prev,
+                                  requiredRoomTypes: (prev.requiredRoomTypes || []).filter(rt => rt.type !== type),
+                                }));
+                              }
+                            }}
+                          />
+                          <Typography variant="body2" sx={{ flexGrow: 1 }}>
+                            {type}
+                          </Typography>
+                        </Box>
+                        {isSelected && (
+                          <TextField
+                            label={`Duration for ${type} (hours)`}
+                            type="number"
+                            value={existing.duration || ''}
+                            onChange={(e) => {
+                              const newDuration = e.target.value;
+                              setFormData(prev => ({
+                                ...prev,
+                                requiredRoomTypes: (prev.requiredRoomTypes || []).map(rt => 
+                                  rt.type === type ? { ...rt, duration: newDuration } : rt
+                                ),
+                              }));
+                            }}
+                            size="small"
+                            fullWidth
+                            inputProps={{ min: 0.5, max: 20, step: 0.5 }}
+                            helperText={(() => {
+                              const currentTotal = (formData.requiredRoomTypes || []).reduce((sum, rt) => {
+                                return sum + (parseFloat(rt.duration) || 0);
+                              }, 0);
+                              const remaining = (parseFloat(formData.durationPerWeek) || 0) - currentTotal;
+                              return `Remaining: ${remaining >= 0 ? remaining.toFixed(1) : '0'}h`;
+                            })()}
+                          />
+                        )}
+                      </Box>
+                    );
+                  })}
+                </Box>
+                <Typography variant="caption" color="textSecondary" sx={{ mt: 1, display: 'block' }}>
+                  Total allocated: {formData.requiredRoomTypes?.reduce((sum, rt) => sum + (parseFloat(rt.duration) || 0), 0).toFixed(1) || 0}h / {formData.durationPerWeek || 0}h
+                </Typography>
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={6}>
@@ -470,7 +593,11 @@ const EnhancedSubjectManagement = () => {
           <Button
             onClick={handleSubmit}
             variant="contained"
-            disabled={loading || !formData.name || !formData.code || !formData.durationPerWeek || !formData.requiredRoomType || !formData.priority}
+            disabled={loading || !formData.name || !formData.code || !formData.durationPerWeek || !formData.requiredRoomTypes || formData.requiredRoomTypes.length === 0 || !formData.priority || (() => {
+              const total = formData.requiredRoomTypes?.reduce((sum, rt) => sum + (parseFloat(rt.duration) || 0), 0) || 0;
+              const expected = parseFloat(formData.durationPerWeek) || 0;
+              return Math.abs(total - expected) > 0.01;
+            })()}
           >
             {editingSubject ? 'Update' : 'Create'}
           </Button>

@@ -53,7 +53,7 @@ const TeacherAccountManager = () => {
     firstName: '',
     lastName: '',
     email: '',
-    subject: '',
+    subjects: [],
     availableStartTime: '08:00',
     availableEndTime: '17:00',
     availableDays: [],
@@ -273,7 +273,15 @@ const TeacherAccountManager = () => {
                             </Typography>
                           </TableCell>
                           <TableCell>{teacher.email}</TableCell>
-                          <TableCell>{teacher.subject}</TableCell>
+                          <TableCell>
+                            {teacher.subjects && teacher.subjects.length > 0 ? (
+                              teacher.subjects.map(subject => (
+                                <Chip key={subject} label={subject} size="small" sx={{ mr: 0.5, mb: 0.5 }} />
+                              ))
+                            ) : (
+                              teacher.subject || 'N/A'
+                            )}
+                          </TableCell>
                           <TableCell>
                             {user ? (
                               <Chip label="Created" color="success" size="small" />
@@ -348,19 +356,41 @@ const TeacherAccountManager = () => {
                     </Grid>
                     <Grid item xs={12}>
                       <FormControl fullWidth required>
-                        <InputLabel>Subject</InputLabel>
+                        <InputLabel>Subjects (Max 2)</InputLabel>
                         <Select
-                          value={newTeacher.subject}
-                          label="Subject"
-                          onChange={(e) => setNewTeacher({...newTeacher, subject: e.target.value})}
+                          multiple
+                          value={newTeacher.subjects}
+                          label="Subjects (Max 2)"
+                          onChange={(e) => setNewTeacher({...newTeacher, subjects: e.target.value})}
+                          renderValue={(selected) => (
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                              {selected.map((value) => (
+                                <Chip key={value} label={value} size="small" />
+                              ))}
+                            </Box>
+                          )}
                         >
                           {subjects.map((subject) => (
-                            <MenuItem key={subject} value={subject}>
+                            <MenuItem 
+                              key={subject} 
+                              value={subject}
+                              disabled={newTeacher.subjects.length >= 2 && !newTeacher.subjects.includes(subject)}
+                            >
                               {subject}
                             </MenuItem>
                           ))}
                         </Select>
                       </FormControl>
+                      {newTeacher.subjects.length === 0 && (
+                        <Typography variant="caption" color="error">
+                          Please select at least one subject
+                        </Typography>
+                      )}
+                      {newTeacher.subjects.length > 2 && (
+                        <Typography variant="caption" color="error">
+                          Maximum 2 subjects allowed
+                        </Typography>
+                      )}
                     </Grid>
                     <Grid item xs={12} sm={6}>
                       <TextField

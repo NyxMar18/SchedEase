@@ -408,7 +408,7 @@ const EnhancedScheduleViewer = () => {
                       >
                         {teachers.map((teacher) => (
                           <MenuItem key={teacher.id} value={teacher.id}>
-                            {teacher.firstName} {teacher.lastName} ({teacher.subject})
+                            {teacher.firstName} {teacher.lastName} ({teacher.subjects && teacher.subjects.length > 0 ? teacher.subjects.join(', ') : teacher.subject || 'N/A'})
                           </MenuItem>
                         ))}
                       </Select>
@@ -444,7 +444,7 @@ const EnhancedScheduleViewer = () => {
                       >
                         {subjects.map((subject) => (
                           <MenuItem key={subject.id} value={subject.id}>
-                            {subject.name} ({subject.durationPerWeek}h/week)
+                            {subject.name} ({(subject.durationPerWeek * 0.5).toFixed(1)}h/week)
                           </MenuItem>
                         ))}
                       </Select>
@@ -506,12 +506,12 @@ const EnhancedScheduleViewer = () => {
                             </Typography>
                             {schedule.notes && schedule.notes.includes('consecutive') && (
                               <Typography variant="caption" color="primary">
-                                🔗 Consecutive Hours
+                                🔗 Consecutive Blocks
                               </Typography>
                             )}
                             {schedule.durationIndex !== undefined && !schedule.notes?.includes('consecutive') && (
                               <Typography variant="caption" color="textSecondary">
-                                Hour {schedule.durationIndex + 1}/{schedule.subject?.durationPerWeek || 1}
+                                Block {schedule.durationIndex + 1}/{schedule.subject?.durationPerWeek || 1} (30 min each)
                               </Typography>
                             )}
                           </Box>
@@ -520,7 +520,12 @@ const EnhancedScheduleViewer = () => {
                           <Typography variant="body2" fontWeight="medium">
                             {schedule.teacher ? `${schedule.teacher.firstName || ''} ${schedule.teacher.lastName || ''}`.trim() : 'N/A'}
                           </Typography>
-                          {schedule.teacher?.subject && (
+                          {schedule.teacher?.subjects && schedule.teacher.subjects.length > 0 && (
+                            <Typography variant="caption" color="textSecondary">
+                              ({schedule.teacher.subjects.join(', ')})
+                            </Typography>
+                          )}
+                          {schedule.teacher?.subject && !schedule.teacher?.subjects && (
                             <Typography variant="caption" color="textSecondary">
                               ({schedule.teacher.subject})
                             </Typography>
@@ -564,14 +569,22 @@ const EnhancedScheduleViewer = () => {
             <Box>
               {(() => {
                 const daysOfWeek = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
+                // 30-minute time slots to support 1.5 hour schedules
                 const timeSlots = [
-                  { start: '08:00', end: '09:00' },
-                  { start: '09:00', end: '10:00' },
-                  { start: '10:00', end: '11:00' },
-                  { start: '11:00', end: '12:00' },
-                  { start: '13:00', end: '14:00' },
-                  { start: '14:00', end: '15:00' },
-                  { start: '15:00', end: '16:00' },
+                  { start: '08:00', end: '08:30' },
+                  { start: '08:30', end: '09:00' },
+                  { start: '09:00', end: '09:30' },
+                  { start: '09:30', end: '10:00' },
+                  { start: '10:00', end: '10:30' },
+                  { start: '10:30', end: '11:00' },
+                  { start: '11:00', end: '11:30' },
+                  { start: '11:30', end: '12:00' },
+                  { start: '13:00', end: '13:30' },
+                  { start: '13:30', end: '14:00' },
+                  { start: '14:00', end: '14:30' },
+                  { start: '14:30', end: '15:00' },
+                  { start: '15:00', end: '15:30' },
+                  { start: '15:30', end: '16:00' },
                 ];
 
                 return (
@@ -598,11 +611,23 @@ const EnhancedScheduleViewer = () => {
                               </Typography>
                             </TableCell>
                             {daysOfWeek.map(day => {
+                              // Find schedule for this exact time slot (each slot is now an individual schedule)
                               const scheduleForSlot = filteredSchedules.find(schedule => 
                                 schedule.dayOfWeek === day && 
                                 schedule.startTime === timeSlot.start &&
                                 schedule.endTime === timeSlot.end
                               );
+                              
+                              // Calculate duration text
+                              let durationText = '';
+                              if (scheduleForSlot) {
+                                const startTime = new Date(`2000-01-01 ${scheduleForSlot.startTime}`);
+                                const endTime = new Date(`2000-01-01 ${scheduleForSlot.endTime}`);
+                                const durationMinutes = (endTime - startTime) / (1000 * 60);
+                                durationText = durationMinutes >= 60 ? 
+                                  ` (${(durationMinutes / 60).toFixed(1)}h)` : 
+                                  ` (${durationMinutes}min)`;
+                              }
                               
                               return (
                                 <TableCell key={`${day}-${timeSlot.start}`} align="center">
@@ -618,6 +643,7 @@ const EnhancedScheduleViewer = () => {
                                     }}>
                                       <Typography variant="caption" fontWeight="bold">
                                         {scheduleForSlot.subject?.name || 'N/A'}
+                                        {durationText && ` (${durationText})`}
                                       </Typography>
                                       <Typography variant="caption" display="block">
                                         {scheduleForSlot.teacher ? 

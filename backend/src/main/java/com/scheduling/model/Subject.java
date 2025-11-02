@@ -23,7 +23,8 @@ public class Subject {
     
     @NotNull(message = "Duration per week is required")
     @Positive(message = "Duration must be positive")
-    private Integer durationPerWeek; // Hours per week
+    private Integer durationPerWeek; // Duration in HOURS per week (e.g., 1=1hr, 1.5=1.5hrs, 2=2hrs, 3=3hrs)
+    // Note: This is converted to 30-minute blocks in the scheduler (hours × 2 = blocks)
     
     @NotBlank(message = "Required room type is required")
     private String requiredRoomType;

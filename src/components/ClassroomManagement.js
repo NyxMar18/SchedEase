@@ -49,7 +49,7 @@ const ClassroomManagement = () => {
     description: '',
   });
 
-  const roomTypes = ['Lecture Hall', 'Laboratory', 'Computer Lab', 'Library', 'Auditorium', 'Meeting Room'];
+  const roomTypes = ['Chemistry Lab', 'Biology Lab', 'Physics Lab', 'Computer Lab',  'Lecture Room', 'Physical Education Area'];
 
   useEffect(() => {
     fetchClassrooms();

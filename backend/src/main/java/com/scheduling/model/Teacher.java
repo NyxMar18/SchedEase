@@ -26,8 +26,8 @@ public class Teacher {
     @Column(unique = true)
     private String email;
     
-    @NotBlank(message = "Subject is required")
-    private String subject;
+    @ElementCollection
+    private Set<String> subjects;
     
     @NotNull(message = "Available start time is required")
     private LocalTime availableStartTime;
@@ -46,13 +46,13 @@ public class Teacher {
     // Constructors
     public Teacher() {}
     
-    public Teacher(String firstName, String lastName, String email, String subject, 
+    public Teacher(String firstName, String lastName, String email, Set<String> subjects, 
                    LocalTime availableStartTime, LocalTime availableEndTime, 
                    Set<DayOfWeek> availableDays) {
         this.firstName = firstName;
         this.lastName = lastName;
         this.email = email;
-        this.subject = subject;
+        this.subjects = subjects;
         this.availableStartTime = availableStartTime;
         this.availableEndTime = availableEndTime;
         this.availableDays = availableDays;
@@ -91,12 +91,12 @@ public class Teacher {
         this.email = email;
     }
     
-    public String getSubject() {
-        return subject;
+    public Set<String> getSubjects() {
+        return subjects;
     }
     
-    public void setSubject(String subject) {
-        this.subject = subject;
+    public void setSubjects(Set<String> subjects) {
+        this.subjects = subjects;
     }
     
     public LocalTime getAvailableStartTime() {
@@ -141,5 +141,16 @@ public class Teacher {
     
     public String getFullName() {
         return firstName + " " + lastName;
+    }
+    
+    /**
+     * Get all subjects this teacher can teach (includes backward compatibility)
+     */
+    public Set<String> getAllSubjects() {
+        if (subjects != null && !subjects.isEmpty()) {
+            return subjects;
+        }
+        // For backward compatibility, return empty set
+        return new java.util.HashSet<>();
     }
 }

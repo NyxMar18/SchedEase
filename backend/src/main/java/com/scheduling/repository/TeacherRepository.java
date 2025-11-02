@@ -16,9 +16,10 @@ public interface TeacherRepository extends JpaRepository<Teacher, Long> {
     
     Optional<Teacher> findByEmail(String email);
     
-    List<Teacher> findBySubject(String subject);
+    @Query("SELECT t FROM Teacher t JOIN t.subjects s WHERE s = :subject")
+    List<Teacher> findBySubject(@Param("subject") String subject);
     
-    @Query("SELECT t FROM Teacher t WHERE t.subject = :subject AND :day MEMBER OF t.availableDays " +
+    @Query("SELECT t FROM Teacher t JOIN t.subjects s WHERE s = :subject AND :day MEMBER OF t.availableDays " +
            "AND t.availableStartTime <= :startTime AND t.availableEndTime >= :endTime")
     List<Teacher> findAvailableTeachers(@Param("subject") String subject, 
                                        @Param("day") DayOfWeek day,

@@ -51,7 +51,7 @@ public class TeacherController {
             teacher.setFirstName(teacherDetails.getFirstName());
             teacher.setLastName(teacherDetails.getLastName());
             teacher.setEmail(teacherDetails.getEmail());
-            teacher.setSubject(teacherDetails.getSubject());
+            teacher.setSubjects(teacherDetails.getSubjects());
             teacher.setAvailableStartTime(teacherDetails.getAvailableStartTime());
             teacher.setAvailableEndTime(teacherDetails.getAvailableEndTime());
             teacher.setAvailableDays(teacherDetails.getAvailableDays());

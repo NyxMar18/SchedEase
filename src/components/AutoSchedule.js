@@ -218,6 +218,12 @@ const AutoSchedule = () => {
         classrooms: classrooms.length,
         subjects: subjects.length
       });
+      console.log('📦 Classrooms data:', classrooms);
+      console.log('📚 Subjects data:', subjects.map(s => ({ 
+        id: s.id, 
+        name: s.name, 
+        requiredRoomTypes: s.requiredRoomTypes || (s.requiredRoomType ? [s.requiredRoomType] : []) 
+      })));
 
       const schedules = [];
       const failedSchedulesList = []; // Track failed schedules with reasons and resolutions
@@ -346,7 +352,11 @@ const AutoSchedule = () => {
           const teacherUsers = getTeacherUsers();
           const availableTeacherUsers = teacherUsers.filter(user => {
             const teacherData = getTeacherDataForUser(user);
-            // Check if user has subject field directly or through teacher data
+            // Check if teacher has this subject in their subjects array (new format) or subject field (old format)
+            if (teacherData?.subjects && Array.isArray(teacherData.subjects)) {
+              return teacherData.subjects.includes(subject.name);
+            }
+            // Backward compatibility: check old single subject field
             const userSubject = user.subject || teacherData?.subject;
             return userSubject === subject.name;
           });
@@ -370,58 +380,85 @@ const AutoSchedule = () => {
           const teacherData = getTeacherDataForUser(selectedUser);
           console.log(`👨‍🏫 Selected least used teacher for ${subject.name}: ${selectedUser.name || selectedUser.firstName + ' ' + selectedUser.lastName} (current load: ${teacherUsage[selectedUser.id] || 0})`);
 
-          const suitableClassrooms = classrooms.filter(classroom => 
-              classroom.roomType === subject.requiredRoomType || 
-              subject.requiredRoomType === 'Any' ||
-              !subject.requiredRoomType
-            );
-
-          console.log(`🏫 Looking for classroom for subject: ${subject.name} (required: ${subject.requiredRoomType || 'Any'})`);
-          console.log(`🏫 Found ${suitableClassrooms.length} suitable classrooms`);
-
-          if (suitableClassrooms.length === 0) {
-            console.log(`❌ No classroom found for subject: ${subject.name} (room type: ${subject.requiredRoomType || 'Any'})`);
-            // Track missing classroom
-            failedSchedulesList.push({
-              section: section.sectionName,
-              subject: subject.name,
-              reason: 'No classroom available',
-              details: `No classroom found for room type: ${subject.requiredRoomType || 'Any'}`,
-              type: 'missing_classroom',
-              resolution: `Add a classroom with room type: ${subject.requiredRoomType || 'Any'}`
-            });
-            continue;
+          // Handle backward compatibility: get required room types with durations
+          let roomTypeConfigs = [];
+          if (subject.requiredRoomTypes && Array.isArray(subject.requiredRoomTypes)) {
+            // Check if it's new format (array of objects) or old format (array of strings)
+            if (subject.requiredRoomTypes.length > 0 && typeof subject.requiredRoomTypes[0] === 'object') {
+              roomTypeConfigs = subject.requiredRoomTypes;
+            } else {
+              // Old format: array of strings - distribute duration evenly
+              const totalDuration = parseFloat(subject.durationPerWeek) || 1;
+              const perType = totalDuration / subject.requiredRoomTypes.length;
+              roomTypeConfigs = subject.requiredRoomTypes.map(type => ({ type, duration: perType }));
+            }
+          } else if (subject.requiredRoomType) {
+            // Old format: single string
+            roomTypeConfigs = [{ type: subject.requiredRoomType, duration: parseFloat(subject.durationPerWeek) || 1 }];
+          } else {
+            // No room type specified - use any classroom
+            roomTypeConfigs = [{ type: 'Any', duration: parseFloat(subject.durationPerWeek) || 1 }];
           }
-
-          // Create scheduling requests distributed uniformly across the week
-              const subjectDuration = parseInt(subject.durationPerWeek) || 1; // Default to 1 hour if not specified
+          
+          console.log(`🏫 Room type configuration for ${subject.name}:`, roomTypeConfigs);
+          
+          // Process each room type configuration separately
+          for (const roomTypeConfig of roomTypeConfigs) {
+            const roomTypeDuration = parseFloat(roomTypeConfig.duration) || 1;
+            const requiredRoomType = roomTypeConfig.type;
+            
+            console.log(`🏫 Looking for classroom for subject: ${subject.name} (room type: ${requiredRoomType}, duration: ${roomTypeDuration}h)`);
+            
+            const suitableClassrooms = classrooms.filter(classroom => {
+              const classroomType = (classroom.roomType || '').toLowerCase().trim();
+              const normalizedRequiredType = (requiredRoomType || '').toLowerCase().trim();
               
-          console.log(`✅ Creating ${subjectDuration} hours for ${section.sectionName} - ${subject.name} (distributed across week)`);
-          
-          // Determine optimal schedule pattern based on subject duration
-          const optimalPattern = getOptimalSchedulePattern(subjectDuration);
-          const availableDays = getAvailableDaysForPattern(optimalPattern);
-          
-          console.log(`📅 Section ${section.sectionName} - ${subject.name}: ${subjectDuration} hours → Optimal pattern: ${optimalPattern} -> Days: ${availableDays.join(', ')}`);
-          
-          console.log(`📊 Creating uniform schedule for ${subject.name}: ${subjectDuration} hours scheduled on ${availableDays.length} days using optimal ${optimalPattern} pattern`);
-          
-          // Create one scheduling request with optimal pattern based on duration
-          // Automatically assigns: 1-2h→TTH, 3h→MWF, 4+h→DAILY for maximum efficiency
-          const selectedClassroom = getLeastUsedClassroom(suitableClassrooms);
-          
-                schedulingRequests.push({
-                  section,
-                  subject,
-            teacher: teacherData || selectedUser, // Use teacher data or user data for scheduling
-            teacherUser: selectedUser, // Store user data for tracking
-            classroom: selectedClassroom,
-            durationIndex: 0, // All hours are part of the same uniform schedule
-            totalDuration: subjectDuration,
-            availableDays: availableDays, // All days this should be scheduled
-            uniformSchedule: true, // Flag to indicate this needs uniform scheduling
-            suitableClassrooms // Store all suitable classrooms for later use
-          });
+              return (
+                classroomType === normalizedRequiredType ||
+                normalizedRequiredType === 'any' ||
+                !normalizedRequiredType ||
+                !requiredRoomType
+              );
+            });
+
+            console.log(`🏫 Found ${suitableClassrooms.length} suitable classrooms for ${subject.name} (${requiredRoomType})`);
+
+            if (suitableClassrooms.length === 0) {
+              console.log(`❌ No classroom found for subject: ${subject.name} (room type: ${requiredRoomType})`);
+              failedSchedulesList.push({
+                section: section.sectionName,
+                subject: subject.name,
+                reason: 'No classroom available',
+                details: `No classroom found for room type: ${requiredRoomType}`,
+                type: 'missing_classroom',
+                resolution: `Add a classroom with room type: ${requiredRoomType}`
+              });
+              continue;
+            }
+
+            // Determine optimal schedule pattern based on room type duration
+            const optimalPattern = getOptimalSchedulePattern(roomTypeDuration);
+            const availableDays = getAvailableDaysForPattern(optimalPattern);
+            
+            console.log(`✅ Creating ${roomTypeDuration} hours for ${section.sectionName} - ${subject.name} in ${requiredRoomType} (distributed across week)`);
+            console.log(`📅 Room type ${requiredRoomType}: ${roomTypeDuration} hours → Optimal pattern: ${optimalPattern} -> Days: ${availableDays.join(', ')}`);
+            
+            const selectedClassroom = getLeastUsedClassroom(suitableClassrooms);
+            
+            schedulingRequests.push({
+              section,
+              subject,
+              teacher: teacherData || selectedUser,
+              teacherUser: selectedUser,
+              classroom: selectedClassroom,
+              durationIndex: 0,
+              totalDuration: roomTypeDuration,
+              availableDays: availableDays,
+              uniformSchedule: true,
+              suitableClassrooms,
+              requiredRoomType: requiredRoomType // Store which room type this request is for
+            });
+          }
         }
       }
 
@@ -474,42 +511,84 @@ const AutoSchedule = () => {
                 }
                 
                 if (canUseOnRequiredDays) {
-                  // Create schedules for the required number of days (respecting duration)
-                  for (const day of requiredDays) {
-              const schedule = {
-                date: new Date().toISOString().split('T')[0],
-                startTime: timeSlot.start,
-                endTime: timeSlot.end,
-                dayOfWeek: day,
-                teacher: request.teacher,
-                      classroom: availableClassroom,
-                subject: request.subject.name,
-                      section: request.section,
-                      subjectDuration: request.totalDuration,
-                      durationIndex: 0,
-                      schoolYearId: selectedSchoolYear, // Add school year ID
-                      notes: `Auto-generated uniform schedule for ${request.section.sectionName} - ${request.subject.name} at ${timeSlot.start}`,
-                isRecurring: true,
-                status: 'scheduled'
-              };
-
-              schedules.push(schedule);
-              
-              // Update usage counters
-              dayUsage[day]++;
-              timeUsage[timeSlot.start]++;
-                    teacherUsage[request.teacherUser.id] = (teacherUsage[request.teacherUser.id] || 0) + 1;
+                  // Calculate duration and break into 30-minute individual schedule entries
+                  const startTime = new Date(`2000-01-01 ${timeSlot.start}`);
+                  const endTime = new Date(`2000-01-01 ${timeSlot.end}`);
+                  const durationMinutes = (endTime - startTime) / (1000 * 60);
+                  const numberOfSlots = Math.floor(durationMinutes / 30);
+                  
+                  // Check if all consecutive slots are available
+                  let allSlotsAvailable = true;
+                  const individualSlots = [];
+                  
+                  for (let i = 0; i < numberOfSlots; i++) {
+                    const slotStartMinutes = startTime.getHours() * 60 + startTime.getMinutes() + (i * 30);
+                    const slotStartHours = Math.floor(slotStartMinutes / 60);
+                    const slotStartMins = slotStartMinutes % 60;
+                    const slotEndMinutes = slotStartMinutes + 30;
+                    const slotEndHours = Math.floor(slotEndMinutes / 60);
+                    const slotEndMins = slotEndMinutes % 60;
+                    
+                    const slotStartTime = `${String(slotStartHours).padStart(2, '0')}:${String(slotStartMins).padStart(2, '0')}`;
+                    const slotEndTime = `${String(slotEndHours).padStart(2, '0')}:${String(slotEndMins).padStart(2, '0')}`;
+                    
+                    individualSlots.push({ start: slotStartTime, end: slotEndTime });
+                    
+                    // Check if this slot is available on all required days
+                    for (const day of requiredDays) {
+                      const slotKey = `${day}-${slotStartTime}-${slotEndTime}-${request.teacher.id}-${availableClassroom.id}`;
+                      if (usedSlots.has(slotKey)) {
+                        allSlotsAvailable = false;
+                        break;
+                      }
+                    }
+                    if (!allSlotsAvailable) break;
                   }
                   
-                  // Mark only the actually used slot keys as used
-                  requiredDays.forEach(day => {
-                    const slotKey = `${day}-${timeSlot.start}-${timeSlot.end}-${request.teacher.id}-${availableClassroom.id}`;
-                usedSlots.add(slotKey);
-                  });
-                  classroomUsage[availableClassroom.id] = (classroomUsage[availableClassroom.id] || 0) + requiredDays.length;
-                  
-                  assigned = true;
-                  console.log(`✅ Assigned uniform schedule for ${request.section.sectionName} - ${request.subject.name} at ${timeSlot.start} on ${requiredDays.length} days (${requiredDays.join(', ')}) - Duration: ${request.totalDuration} hours`);
+                  if (allSlotsAvailable) {
+                    // Create individual schedule entries for each 30-minute slot
+                    for (const day of requiredDays) {
+                      let slotIndex = 0;
+                      for (const slot of individualSlots) {
+                        const schedule = {
+                          date: new Date().toISOString().split('T')[0],
+                          startTime: slot.start,
+                          endTime: slot.end,
+                          dayOfWeek: day,
+                          teacher: request.teacher,
+                          classroom: availableClassroom,
+                          subject: request.subject.name,
+                          section: request.section,
+                          subjectDuration: request.totalDuration,
+                          durationIndex: slotIndex,
+                          schoolYearId: selectedSchoolYear,
+                          notes: `Auto-generated schedule for ${request.section.sectionName} - ${request.subject.name} (Slot ${slotIndex + 1}/${numberOfSlots})`,
+                          isRecurring: true,
+                          status: 'scheduled'
+                        };
+
+                        schedules.push(schedule);
+                        
+                        // Mark this slot as used
+                        const slotKey = `${day}-${slot.start}-${slot.end}-${request.teacher.id}-${availableClassroom.id}`;
+                        usedSlots.add(slotKey);
+                        
+                        // Update usage counters
+                        dayUsage[day]++;
+                        timeUsage[slot.start]++;
+                        teacherUsage[request.teacherUser.id] = (teacherUsage[request.teacherUser.id] || 0) + 1;
+                        
+                        slotIndex++;
+                      }
+                    }
+                    
+                    classroomUsage[availableClassroom.id] = (classroomUsage[availableClassroom.id] || 0) + (requiredDays.length * numberOfSlots);
+                    
+                    assigned = true;
+                    console.log(`✅ Assigned ${numberOfSlots} individual schedules for ${request.section.sectionName} - ${request.subject.name} starting at ${timeSlot.start} on ${requiredDays.length} days (${requiredDays.join(', ')}) - Total: ${requiredDays.length * numberOfSlots} schedule entries`);
+                  } else {
+                    attempts++;
+                  }
                 } else {
                   attempts++;
                 }
@@ -1047,7 +1126,7 @@ const AutoSchedule = () => {
                   </Box>
                   
                   <Box sx={{ maxHeight: 300, overflowY: 'auto', pr: 1 }}>
-                    {timeSlots.map((timeSlot) => {
+                    {timeSlots.map((timeSlot, slotIndex) => {
                       const count = generatedSchedules.filter(s => s.startTime === timeSlot.start).length;
                       const percentage = generatedSchedules.length > 0 ? Math.round((count / generatedSchedules.length) * 100) : 0;
                       const maxCount = Math.max(...timeSlots.map(slot => 
@@ -1055,7 +1134,7 @@ const AutoSchedule = () => {
                       ));
                       
                       return (
-                        <Box key={timeSlot.start} sx={{ mb: 2 }}>
+                        <Box key={`time-slot-${timeSlot.start}-${timeSlot.end}-${slotIndex}`} sx={{ mb: 2 }}>
                           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                             <Typography variant="body2" fontWeight="medium" color="text.primary">
                               {timeSlot.start}-{timeSlot.end}
@@ -1431,16 +1510,18 @@ const AutoSchedule = () => {
             <Grid container spacing={2}>
               {getTeacherUsers().map(user => {
                 const teacherData = getTeacherDataForUser(user);
-                const userSubject = user.subject || teacherData?.subject;
+                // Get subjects from new subjects array or old subject field
+                const userSubjects = teacherData?.subjects || [user.subject || teacherData?.subject].filter(Boolean);
+                const userSubject = userSubjects.length > 0 ? userSubjects.join(', ') : 'N/A';
                 const scheduleCount = generatedSchedules.filter(s => {
                   const scheduleTeacherId = s.teacher?.id || s.teacherUser?.id;
                   return scheduleTeacherId === user.id || scheduleTeacherId === teacherData?.id;
                 }).length;
-                const teacherSubjects = subjects.filter(subject => subject.name === userSubject);
+                const teacherSubjects = subjects.filter(subject => userSubjects.includes(subject.name));
                 const maxPossibleLoad = teacherSubjects.reduce((sum, subject) => sum + (parseInt(subject.durationPerWeek) || 1), 0);
                 const workloadPercent = maxPossibleLoad > 0 ? Math.round((scheduleCount / maxPossibleLoad) * 100) : 0;
                 
-                if (!userSubject) return null;
+                if (userSubjects.length === 0) return null;
                 
                 return (
                   <Grid item xs={12} sm={6} md={4} key={user.id}>
@@ -1574,19 +1655,18 @@ const AutoSchedule = () => {
         </Card>
       )}
 
-      {/* Debug: Failed Schedules State */}
-      {console.log('🔍 Render: failedSchedules.length =', failedSchedules.length, 'failedSchedules =', failedSchedules)}
-      
       {/* Debug Display - Remove this after testing */}
       <Card sx={{ mb: 2, bgcolor: 'grey.100' }}>
         <CardContent>
-          <Typography variant="body2">
+          <Typography variant="body2" component="div">
             <strong>Debug Info:</strong> Failed Schedules Count: {failedSchedules.length}
             {failedSchedules.length > 0 && (
-              <div>
+              <Box sx={{ mt: 1 }}>
                 <strong>Failed Schedules:</strong>
-                <pre>{JSON.stringify(failedSchedules, null, 2)}</pre>
-              </div>
+                <Box component="pre" sx={{ mt: 1, p: 1, bgcolor: 'grey.200', borderRadius: 1, overflow: 'auto' }}>
+                  {JSON.stringify(failedSchedules, null, 2)}
+                </Box>
+              </Box>
             )}
           </Typography>
         </CardContent>
