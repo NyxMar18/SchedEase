@@ -59,6 +59,52 @@ import firebaseConfig from '../firebase/config';
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
+// Color palette for subjects - distinct, readable colors
+const SUBJECT_COLORS = [
+  { bg: '#1976d2', text: '#ffffff' }, // Blue
+  { bg: '#388e3c', text: '#ffffff' }, // Green
+  { bg: '#f57c00', text: '#ffffff' }, // Orange
+  { bg: '#7b1fa2', text: '#ffffff' }, // Purple
+  { bg: '#c2185b', text: '#ffffff' }, // Pink
+  { bg: '#00796b', text: '#ffffff' }, // Teal
+  { bg: '#d32f2f', text: '#ffffff' }, // Red
+  { bg: '#0288d1', text: '#ffffff' }, // Light Blue
+  { bg: '#5d4037', text: '#ffffff' }, // Brown
+  { bg: '#455a64', text: '#ffffff' }, // Blue Grey
+  { bg: '#e64a19', text: '#ffffff' }, // Deep Orange
+  { bg: '#512da8', text: '#ffffff' }, // Deep Purple
+  { bg: '#c62828', text: '#ffffff' }, // Dark Red
+  { bg: '#1565c0', text: '#ffffff' }, // Dark Blue
+  { bg: '#2e7d32', text: '#ffffff' }, // Dark Green
+  { bg: '#f9a825', text: '#000000' }, // Amber
+  { bg: '#00acc1', text: '#ffffff' }, // Cyan
+  { bg: '#8e24aa', text: '#ffffff' }, // Violet
+  { bg: '#d84315', text: '#ffffff' }, // Deep Orange
+  { bg: '#00695c', text: '#ffffff' }, // Dark Teal
+];
+
+// Function to get a consistent color for a subject
+const getSubjectColor = (subject) => {
+  // Extract subject name (handle both string and object formats)
+  const subjectName = typeof subject === 'string' 
+    ? subject 
+    : subject?.name || subject?.subject || 'N/A';
+  
+  if (!subjectName || subjectName === 'N/A') {
+    return { bg: '#757575', text: '#ffffff' }; // Grey for unknown
+  }
+  
+  // Simple hash function to get consistent index
+  let hash = 0;
+  for (let i = 0; i < subjectName.length; i++) {
+    hash = subjectName.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  
+  // Get color from palette using hash
+  const colorIndex = Math.abs(hash) % SUBJECT_COLORS.length;
+  return SUBJECT_COLORS[colorIndex];
+};
+
 const ScheduleViewer = () => {
   const { user, isAdmin, isTeacher } = useAuth();
   
@@ -281,26 +327,11 @@ const ScheduleViewer = () => {
     if (filterType === 'classroom' && selectedClassroom) {
       filtered = filtered.filter(schedule => schedule.classroom?.id === selectedClassroom);
     } else if (filterType === 'teacher' && selectedTeacher) {
-      const selectedTeacherData = teachers.find(t => t.id === selectedTeacher);
-      console.log('🔍 Filtering by teacher:', selectedTeacherData);
-      console.log('📚 Teacher subject:', selectedTeacherData?.subject);
-      
+      // Filter by teacher ID - show ALL schedules for this teacher
       filtered = filtered.filter(schedule => {
-        const matchesTeacher = schedule.teacher?.id === selectedTeacher;
-        const scheduleSubject = schedule.subject;
-        
-        console.log(`📋 Schedule: ${scheduleSubject} | Teacher: ${selectedTeacherData?.subject} | Matches: ${matchesTeacher}`);
-        
-        // Additional check: ensure the teacher actually teaches this subject
-        const teacherTeachesSubject = scheduleSubject === selectedTeacherData?.subject;
-        
-        if (matchesTeacher && !teacherTeachesSubject) {
-          console.warn(`⚠️ WARNING: Teacher ${selectedTeacherData?.firstName} ${selectedTeacherData?.lastName} is assigned to teach ${scheduleSubject} but their subject is ${selectedTeacherData?.subject}`);
-          // Don't show this schedule if teacher doesn't actually teach this subject
-          return false;
-        }
-        
-        return matchesTeacher && teacherTeachesSubject;
+        // Check if the schedule's teacher matches the selected teacher
+        const teacherId = schedule.teacher?.id || schedule.teacher?.teacherId;
+        return teacherId === selectedTeacher || schedule.teacher?.id === selectedTeacher;
       });
     } else if (filterType === 'section' && selectedSection) {
       filtered = filtered.filter(schedule => schedule.section?.id === selectedSection);
@@ -411,6 +442,29 @@ const ScheduleViewer = () => {
 
     return start1Time < end2Time && start2Time < end1Time;
   };
+  
+  // Helper function to check if a time overlaps with break periods
+  const overlapsWithBreak = (startTime, endTime) => {
+    const breakPeriods = [
+      { start: '09:00', end: '09:15', label: 'Morning Break' },
+      { start: '12:15', end: '13:15', label: 'Lunch Break' },
+      { start: '16:15', end: '16:30', label: 'Afternoon Break' },
+    ];
+    
+    const scheduleStart = new Date(`2000-01-01 ${startTime}`);
+    const scheduleEnd = new Date(`2000-01-01 ${endTime}`);
+    
+    for (const breakPeriod of breakPeriods) {
+      const breakStart = new Date(`2000-01-01 ${breakPeriod.start}`);
+      const breakEnd = new Date(`2000-01-01 ${breakPeriod.end}`);
+      
+      if (scheduleStart < breakEnd && scheduleEnd > breakStart) {
+        return { overlaps: true, breakLabel: breakPeriod.label };
+      }
+    }
+    
+    return { overlaps: false };
+  };
 
   // Handle edit button click
   const handleEditSchedule = (schedule) => {
@@ -452,6 +506,14 @@ const ScheduleViewer = () => {
   const handleSaveSchedule = async () => {
     try {
       setLoading(true);
+      
+      // Check if schedule overlaps with break time
+      const breakCheck = overlapsWithBreak(editFormData.startTime, editFormData.endTime);
+      if (breakCheck.overlaps) {
+        setError(`Cannot schedule during ${breakCheck.breakLabel} (${breakCheck.breakLabel === 'Morning Break' ? '09:00-09:15' : breakCheck.breakLabel === 'Lunch Break' ? '12:15-13:15' : '16:15-16:30'})`);
+        setLoading(false);
+        return;
+      }
       
       // Final conflict check
       const finalConflicts = detectConflicts(editingSchedule?.id, editFormData);
@@ -558,6 +620,14 @@ const ScheduleViewer = () => {
   const handleSaveNewSchedule = async () => {
     try {
       setLoading(true);
+      
+      // Check if schedule overlaps with break time
+      const breakCheck = overlapsWithBreak(addFormData.startTime, addFormData.endTime);
+      if (breakCheck.overlaps) {
+        setError(`Cannot schedule during ${breakCheck.breakLabel} (${breakCheck.breakLabel === 'Morning Break' ? '09:00-09:15' : breakCheck.breakLabel === 'Lunch Break' ? '12:15-13:15' : '16:15-16:30'})`);
+        setLoading(false);
+        return;
+      }
       
       // Prepare schedule data
       const selectedTeacher = teachers.find(t => t.id === addFormData.teacher);
@@ -712,6 +782,17 @@ const ScheduleViewer = () => {
         endTime: newEndTime
       };
       
+      // Check if the new time overlaps with break periods
+      const breakCheck = overlapsWithBreak(targetTimeSlot.start, newEndTime);
+      if (breakCheck.overlaps) {
+        setError(`Cannot move schedule during ${breakCheck.breakLabel} (${breakCheck.breakLabel === 'Morning Break' ? '09:00-09:15' : breakCheck.breakLabel === 'Lunch Break' ? '12:15-13:15' : '16:15-16:30'})`);
+        setDraggedSchedule(null);
+        setDragOverSlot(null);
+        setIsDragging(false);
+        setLoading(false);
+        return;
+      }
+      
       // Check for conflicts across all slots the schedule will occupy
       const conflicts = detectConflictsForSlot(targetDay, targetTimeSlot, tempScheduleForConflictCheck);
       
@@ -720,6 +801,7 @@ const ScheduleViewer = () => {
         setDraggedSchedule(null);
         setDragOverSlot(null);
         setIsDragging(false);
+        setLoading(false);
         return;
       }
 
@@ -1091,17 +1173,26 @@ const ScheduleViewer = () => {
         {/* Subject Mismatch Warning - Only for admins */}
         {isAdmin() && filterType === 'teacher' && selectedTeacher && (() => {
           const selectedTeacherData = teachers.find(t => t.id === selectedTeacher);
-          const mismatchedSchedules = filteredSchedules.filter(schedule => 
-            schedule.subject !== selectedTeacherData?.subject
-          );
+          if (!selectedTeacherData) return null;
           
-          if (mismatchedSchedules.length > 0) {
+          // Check for subject mismatches - teachers can have multiple subjects now
+          const teacherSubjects = selectedTeacherData.subjects && selectedTeacherData.subjects.length > 0 
+            ? selectedTeacherData.subjects 
+            : (selectedTeacherData.subject ? [selectedTeacherData.subject] : []);
+          
+          const mismatchedSchedules = filteredSchedules.filter(schedule => {
+            if (!schedule.subject) return false;
+            // Check if the schedule's subject is in the teacher's subjects list
+            return !teacherSubjects.includes(schedule.subject);
+          });
+          
+          if (mismatchedSchedules.length > 0 && teacherSubjects.length > 0) {
             return (
               <Alert severity="warning" sx={{ mt: 2 }}>
                 <Typography variant="body2">
                   ⚠️ <strong>Warning:</strong> Found {mismatchedSchedules.length} schedule(s) where the teacher is assigned to teach subjects they don't specialize in.
                   <br />
-                  Teacher specializes in: <strong>{selectedTeacherData?.subject}</strong>
+                  Teacher specializes in: <strong>{teacherSubjects.join(', ')}</strong>
                   <br />
                   Assigned subjects: <strong>{[...new Set(mismatchedSchedules.map(s => s.subject))].join(', ')}</strong>
                 </Typography>
@@ -1151,7 +1242,17 @@ const ScheduleViewer = () => {
                     </Typography>
                   </TableCell>
                   <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: 1,
+                      p: 0.5,
+                      borderRadius: 1,
+                      bgcolor: getSubjectColor(schedule.subject).bg,
+                      color: getSubjectColor(schedule.subject).text,
+                      width: 'fit-content',
+                      minWidth: 100
+                    }}>
                       <Typography variant="body2" fontWeight="medium">
                         {schedule.subject || 'N/A'}
                       </Typography>
@@ -1262,23 +1363,55 @@ const ScheduleViewer = () => {
           )}
           {(() => {
             const daysOfWeek = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
-            // 30-minute time slots to support 1.5 hour schedules
+            // 15-minute time slots to support flexible scheduling
+            // Excludes break times: 9:00-9:15 (morning break), 12:15-13:15 (lunch), 16:15-16:30 (afternoon break)
             const timeSlots = [
-              { start: '08:00', end: '08:30' },
-              { start: '08:30', end: '09:00' },
-              { start: '09:00', end: '09:30' },
-              { start: '09:30', end: '10:00' },
-              { start: '10:00', end: '10:30' },
-              { start: '10:30', end: '11:00' },
-              { start: '11:00', end: '11:30' },
-              { start: '11:30', end: '12:00' },
-              { start: '13:00', end: '13:30' },
-              { start: '13:30', end: '14:00' },
-              { start: '14:00', end: '14:30' },
-              { start: '14:30', end: '15:00' },
-              { start: '15:00', end: '15:30' },
-              { start: '15:30', end: '16:00' },
+              { start: '08:00', end: '08:15' },
+              { start: '08:15', end: '08:30' },
+              { start: '08:30', end: '08:45' },
+              { start: '08:45', end: '09:00' },
+              // Break: 9:00-9:15 (excluded)
+              { start: '09:15', end: '09:30' },
+              { start: '09:30', end: '09:45' },
+              { start: '09:45', end: '10:00' },
+              { start: '10:00', end: '10:15' },
+              { start: '10:15', end: '10:30' },
+              { start: '10:30', end: '10:45' },
+              { start: '10:45', end: '11:00' },
+              { start: '11:00', end: '11:15' },
+              { start: '11:15', end: '11:30' },
+              { start: '11:30', end: '11:45' },
+              { start: '11:45', end: '12:00' },
+              { start: '12:00', end: '12:15' },
+              // Lunch: 12:15-13:15 (excluded)
+              { start: '13:15', end: '13:30' },
+              { start: '13:30', end: '13:45' },
+              { start: '13:45', end: '14:00' },
+              { start: '14:00', end: '14:15' },
+              { start: '14:15', end: '14:30' },
+              { start: '14:30', end: '14:45' },
+              { start: '14:45', end: '15:00' },
+              { start: '15:00', end: '15:15' },
+              { start: '15:15', end: '15:30' },
+              { start: '15:30', end: '15:45' },
+              { start: '15:45', end: '16:00' },
+              { start: '16:00', end: '16:15' },
+              // Break: 16:15-16:30 (excluded)
             ];
+            
+            // Break periods to display
+            const breakPeriods = [
+              { start: '09:00', end: '09:15', label: 'Morning Break' },
+              { start: '12:15', end: '13:15', label: 'Lunch Break' },
+              { start: '16:15', end: '16:30', label: 'Afternoon Break' },
+            ];
+            
+            // Helper function to check if a time slot is a break
+            const isBreakTime = (start, end) => {
+              return breakPeriods.some(breakPeriod => 
+                breakPeriod.start === start && breakPeriod.end === end
+              );
+            };
 
             return (
               <TableContainer component={Paper}>
@@ -1296,14 +1429,53 @@ const ScheduleViewer = () => {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {timeSlots.map(timeSlot => (
-                      <TableRow key={`${timeSlot.start}-${timeSlot.end}`}>
-                        <TableCell>
-                          <Typography variant="body2" fontWeight="medium">
-                            {timeSlot.start} - {timeSlot.end}
-                          </Typography>
-                        </TableCell>
-                        {daysOfWeek.map(day => {
+                    {timeSlots.map((timeSlot, slotIndex) => {
+                      // Check if we need to insert a break row before this slot
+                      const breakBefore = breakPeriods.find(bp => {
+                        // Check if this slot starts right after a break
+                        const slotStart = timeSlot.start;
+                        return bp.end === slotStart;
+                      });
+                      
+                      return (
+                        <React.Fragment key={`${timeSlot.start}-${timeSlot.end}`}>
+                          {/* Insert break row if needed */}
+                          {breakBefore && (
+                            <TableRow>
+                              <TableCell>
+                                <Typography variant="body2" fontWeight="bold" color="warning.main">
+                                  {breakBefore.start} - {breakBefore.end}
+                                </Typography>
+                                <Typography variant="caption" color="warning.main">
+                                  {breakBefore.label}
+                                </Typography>
+                              </TableCell>
+                              {daysOfWeek.map(day => (
+                                <TableCell 
+                                  key={day}
+                                  align="center"
+                                  sx={{
+                                    bgcolor: 'warning.light',
+                                    border: '1px solid',
+                                    borderColor: 'warning.main',
+                                    minHeight: 60
+                                  }}
+                                >
+                                  <Typography variant="caption" color="warning.dark" fontWeight="bold">
+                                    {breakBefore.label}
+                                  </Typography>
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                          )}
+                          
+                          <TableRow key={`${timeSlot.start}-${timeSlot.end}`}>
+                            <TableCell>
+                              <Typography variant="body2" fontWeight="medium">
+                                {timeSlot.start} - {timeSlot.end}
+                              </Typography>
+                            </TableCell>
+                            {daysOfWeek.map(day => {
                           // Find schedule for this exact time slot (each slot is now an individual schedule)
                           const scheduleForSlot = filteredSchedules.find(schedule => 
                             schedule.dayOfWeek === day && 
@@ -1353,8 +1525,8 @@ const ScheduleViewer = () => {
                                   onDoubleClick={() => isAdmin() && handleEditSchedule(scheduleForSlot)}
                                   sx={{ 
                                     p: 1, 
-                                    bgcolor: isBeingDragged ? 'primary.main' : 'primary.light', 
-                                    color: 'primary.contrastText',
+                                    bgcolor: isBeingDragged ? 'primary.main' : getSubjectColor(scheduleForSlot.subject).bg, 
+                                    color: isBeingDragged ? 'primary.contrastText' : getSubjectColor(scheduleForSlot.subject).text,
                                     minHeight: 80,
                                     display: 'flex',
                                     flexDirection: 'column',
@@ -1393,7 +1565,6 @@ const ScheduleViewer = () => {
                                   </Typography>
                                   {isAdmin() && (
                                     <Typography variant="caption" display="block" sx={{ mt: 0.5, fontStyle: 'italic' }}>
-                                      Drag to move • Double-click to edit
                                     </Typography>
                                   )}
                                 </Card>
@@ -1423,7 +1594,9 @@ const ScheduleViewer = () => {
                           );
                         })}
                       </TableRow>
-                    ))}
+                      </React.Fragment>
+                    );
+                    })}
                   </TableBody>
                 </Table>
               </TableContainer>

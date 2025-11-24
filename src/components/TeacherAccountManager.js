@@ -356,11 +356,11 @@ const TeacherAccountManager = () => {
                     </Grid>
                     <Grid item xs={12}>
                       <FormControl fullWidth required>
-                        <InputLabel>Subjects (Max 2)</InputLabel>
+                        <InputLabel>Subjects</InputLabel>
                         <Select
                           multiple
                           value={newTeacher.subjects}
-                          label="Subjects (Max 2)"
+                          label="Subjects"
                           onChange={(e) => setNewTeacher({...newTeacher, subjects: e.target.value})}
                           renderValue={(selected) => (
                             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
@@ -374,7 +374,6 @@ const TeacherAccountManager = () => {
                             <MenuItem 
                               key={subject} 
                               value={subject}
-                              disabled={newTeacher.subjects.length >= 2 && !newTeacher.subjects.includes(subject)}
                             >
                               {subject}
                             </MenuItem>
@@ -384,11 +383,6 @@ const TeacherAccountManager = () => {
                       {newTeacher.subjects.length === 0 && (
                         <Typography variant="caption" color="error">
                           Please select at least one subject
-                        </Typography>
-                      )}
-                      {newTeacher.subjects.length > 2 && (
-                        <Typography variant="caption" color="error">
-                          Maximum 2 subjects allowed
                         </Typography>
                       )}
                     </Grid>

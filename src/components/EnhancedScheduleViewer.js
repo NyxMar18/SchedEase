@@ -39,6 +39,52 @@ import {
 } from '@mui/icons-material';
 import { scheduleApi, classroomApi, teacherApi, sectionApi, subjectApi } from '../services/backendApi';
 
+// Color palette for subjects - distinct, readable colors
+const SUBJECT_COLORS = [
+  { bg: '#1976d2', text: '#ffffff' }, // Blue
+  { bg: '#388e3c', text: '#ffffff' }, // Green
+  { bg: '#f57c00', text: '#ffffff' }, // Orange
+  { bg: '#7b1fa2', text: '#ffffff' }, // Purple
+  { bg: '#c2185b', text: '#ffffff' }, // Pink
+  { bg: '#00796b', text: '#ffffff' }, // Teal
+  { bg: '#d32f2f', text: '#ffffff' }, // Red
+  { bg: '#0288d1', text: '#ffffff' }, // Light Blue
+  { bg: '#5d4037', text: '#ffffff' }, // Brown
+  { bg: '#455a64', text: '#ffffff' }, // Blue Grey
+  { bg: '#e64a19', text: '#ffffff' }, // Deep Orange
+  { bg: '#512da8', text: '#ffffff' }, // Deep Purple
+  { bg: '#c62828', text: '#ffffff' }, // Dark Red
+  { bg: '#1565c0', text: '#ffffff' }, // Dark Blue
+  { bg: '#2e7d32', text: '#ffffff' }, // Dark Green
+  { bg: '#f9a825', text: '#000000' }, // Amber
+  { bg: '#00acc1', text: '#ffffff' }, // Cyan
+  { bg: '#8e24aa', text: '#ffffff' }, // Violet
+  { bg: '#d84315', text: '#ffffff' }, // Deep Orange
+  { bg: '#00695c', text: '#ffffff' }, // Dark Teal
+];
+
+// Function to get a consistent color for a subject
+const getSubjectColor = (subject) => {
+  // Extract subject name (handle both string and object formats)
+  const subjectName = typeof subject === 'string' 
+    ? subject 
+    : subject?.name || subject?.subject || 'N/A';
+  
+  if (!subjectName || subjectName === 'N/A') {
+    return { bg: '#757575', text: '#ffffff' }; // Grey for unknown
+  }
+  
+  // Simple hash function to get consistent index
+  let hash = 0;
+  for (let i = 0; i < subjectName.length; i++) {
+    hash = subjectName.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  
+  // Get color from palette using hash
+  const colorIndex = Math.abs(hash) % SUBJECT_COLORS.length;
+  return SUBJECT_COLORS[colorIndex];
+};
+
 const EnhancedScheduleViewer = () => {
   const [schedules, setSchedules] = useState([]);
   const [filteredSchedules, setFilteredSchedules] = useState([]);
@@ -145,7 +191,12 @@ const EnhancedScheduleViewer = () => {
     if (filterType === 'classroom' && selectedClassroom) {
       filtered = filtered.filter(schedule => schedule.classroom?.id === parseInt(selectedClassroom));
     } else if (filterType === 'teacher' && selectedTeacher) {
-      filtered = filtered.filter(schedule => schedule.teacher?.id === parseInt(selectedTeacher));
+      // Filter by teacher ID - show ALL schedules for this teacher
+      const teacherId = parseInt(selectedTeacher);
+      filtered = filtered.filter(schedule => {
+        const scheduleTeacherId = schedule.teacher?.id || schedule.teacher?.teacherId;
+        return scheduleTeacherId === teacherId || schedule.teacher?.id === teacherId;
+      });
     } else if (filterType === 'section' && selectedSection) {
       filtered = filtered.filter(schedule => schedule.section?.id === parseInt(selectedSection));
     } else if (filterType === 'subject' && selectedSubject) {
@@ -511,7 +562,7 @@ const EnhancedScheduleViewer = () => {
                             )}
                             {schedule.durationIndex !== undefined && !schedule.notes?.includes('consecutive') && (
                               <Typography variant="caption" color="textSecondary">
-                                Block {schedule.durationIndex + 1}/{schedule.subject?.durationPerWeek || 1} (30 min each)
+                                Block {schedule.durationIndex + 1}/{schedule.subject?.durationPerWeek || 1} (15 min each)
                               </Typography>
                             )}
                           </Box>
@@ -569,22 +620,47 @@ const EnhancedScheduleViewer = () => {
             <Box>
               {(() => {
                 const daysOfWeek = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
-                // 30-minute time slots to support 1.5 hour schedules
+                // 15-minute time slots to support flexible scheduling
+                // Excludes break times: 9:00-9:15 (morning break), 12:15-13:15 (lunch), 16:15-16:30 (afternoon break)
                 const timeSlots = [
-                  { start: '08:00', end: '08:30' },
-                  { start: '08:30', end: '09:00' },
-                  { start: '09:00', end: '09:30' },
-                  { start: '09:30', end: '10:00' },
-                  { start: '10:00', end: '10:30' },
-                  { start: '10:30', end: '11:00' },
-                  { start: '11:00', end: '11:30' },
-                  { start: '11:30', end: '12:00' },
-                  { start: '13:00', end: '13:30' },
-                  { start: '13:30', end: '14:00' },
-                  { start: '14:00', end: '14:30' },
-                  { start: '14:30', end: '15:00' },
-                  { start: '15:00', end: '15:30' },
-                  { start: '15:30', end: '16:00' },
+                  { start: '08:00', end: '08:15' },
+                  { start: '08:15', end: '08:30' },
+                  { start: '08:30', end: '08:45' },
+                  { start: '08:45', end: '09:00' },
+                  // Break: 9:00-9:15 (excluded)
+                  { start: '09:15', end: '09:30' },
+                  { start: '09:30', end: '09:45' },
+                  { start: '09:45', end: '10:00' },
+                  { start: '10:00', end: '10:15' },
+                  { start: '10:15', end: '10:30' },
+                  { start: '10:30', end: '10:45' },
+                  { start: '10:45', end: '11:00' },
+                  { start: '11:00', end: '11:15' },
+                  { start: '11:15', end: '11:30' },
+                  { start: '11:30', end: '11:45' },
+                  { start: '11:45', end: '12:00' },
+                  { start: '12:00', end: '12:15' },
+                  // Lunch: 12:15-13:15 (excluded)
+                  { start: '13:15', end: '13:30' },
+                  { start: '13:30', end: '13:45' },
+                  { start: '13:45', end: '14:00' },
+                  { start: '14:00', end: '14:15' },
+                  { start: '14:15', end: '14:30' },
+                  { start: '14:30', end: '14:45' },
+                  { start: '14:45', end: '15:00' },
+                  { start: '15:00', end: '15:15' },
+                  { start: '15:15', end: '15:30' },
+                  { start: '15:30', end: '15:45' },
+                  { start: '15:45', end: '16:00' },
+                  { start: '16:00', end: '16:15' },
+                  // Break: 16:15-16:30 (excluded)
+                ];
+                
+                // Break periods to display
+                const breakPeriods = [
+                  { start: '09:00', end: '09:15', label: 'Morning Break' },
+                  { start: '12:15', end: '13:15', label: 'Lunch Break' },
+                  { start: '16:15', end: '16:30', label: 'Afternoon Break' },
                 ];
 
                 return (
@@ -603,14 +679,53 @@ const EnhancedScheduleViewer = () => {
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {timeSlots.map(timeSlot => (
-                          <TableRow key={`${timeSlot.start}-${timeSlot.end}`}>
-                            <TableCell>
-                              <Typography variant="body2" fontWeight="medium">
-                                {timeSlot.start} - {timeSlot.end}
-                              </Typography>
-                            </TableCell>
-                            {daysOfWeek.map(day => {
+                        {timeSlots.map((timeSlot, slotIndex) => {
+                          // Check if we need to insert a break row before this slot
+                          const breakBefore = breakPeriods.find(bp => {
+                            // Check if this slot starts right after a break
+                            const slotStart = timeSlot.start;
+                            return bp.end === slotStart;
+                          });
+                          
+                          return (
+                            <React.Fragment key={`${timeSlot.start}-${timeSlot.end}`}>
+                              {/* Insert break row if needed */}
+                              {breakBefore && (
+                                <TableRow>
+                                  <TableCell>
+                                    <Typography variant="body2" fontWeight="bold" color="warning.main">
+                                      {breakBefore.start} - {breakBefore.end}
+                                    </Typography>
+                                    <Typography variant="caption" color="warning.main">
+                                      {breakBefore.label}
+                                    </Typography>
+                                  </TableCell>
+                                  {daysOfWeek.map(day => (
+                                    <TableCell 
+                                      key={day}
+                                      align="center"
+                                      sx={{
+                                        bgcolor: 'warning.light',
+                                        border: '1px solid',
+                                        borderColor: 'warning.main',
+                                        minHeight: 60
+                                      }}
+                                    >
+                                      <Typography variant="caption" color="warning.dark" fontWeight="bold">
+                                        {breakBefore.label}
+                                      </Typography>
+                                    </TableCell>
+                                  ))}
+                                </TableRow>
+                              )}
+                              
+                              <TableRow key={`${timeSlot.start}-${timeSlot.end}`}>
+                                <TableCell>
+                                  <Typography variant="body2" fontWeight="medium">
+                                    {timeSlot.start} - {timeSlot.end}
+                                  </Typography>
+                                </TableCell>
+                                {daysOfWeek.map(day => {
                               // Find schedule for this exact time slot (each slot is now an individual schedule)
                               const scheduleForSlot = filteredSchedules.find(schedule => 
                                 schedule.dayOfWeek === day && 
@@ -634,8 +749,8 @@ const EnhancedScheduleViewer = () => {
                                   {scheduleForSlot ? (
                                     <Card sx={{ 
                                       p: 1, 
-                                      bgcolor: 'primary.light', 
-                                      color: 'primary.contrastText',
+                                      bgcolor: getSubjectColor(scheduleForSlot.subject?.name || scheduleForSlot.subject).bg, 
+                                      color: getSubjectColor(scheduleForSlot.subject?.name || scheduleForSlot.subject).text,
                                       minHeight: 80,
                                       display: 'flex',
                                       flexDirection: 'column',
@@ -669,7 +784,9 @@ const EnhancedScheduleViewer = () => {
                               );
                             })}
                           </TableRow>
-                        ))}
+                          </React.Fragment>
+                        );
+                        })}
                       </TableBody>
                     </Table>
                   </TableContainer>

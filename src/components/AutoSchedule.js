@@ -511,21 +511,21 @@ const AutoSchedule = () => {
                 }
                 
                 if (canUseOnRequiredDays) {
-                  // Calculate duration and break into 30-minute individual schedule entries
+                  // Calculate duration and break into 15-minute individual schedule entries
                   const startTime = new Date(`2000-01-01 ${timeSlot.start}`);
                   const endTime = new Date(`2000-01-01 ${timeSlot.end}`);
                   const durationMinutes = (endTime - startTime) / (1000 * 60);
-                  const numberOfSlots = Math.floor(durationMinutes / 30);
+                  const numberOfSlots = Math.floor(durationMinutes / 15);
                   
                   // Check if all consecutive slots are available
                   let allSlotsAvailable = true;
                   const individualSlots = [];
                   
                   for (let i = 0; i < numberOfSlots; i++) {
-                    const slotStartMinutes = startTime.getHours() * 60 + startTime.getMinutes() + (i * 30);
+                    const slotStartMinutes = startTime.getHours() * 60 + startTime.getMinutes() + (i * 15);
                     const slotStartHours = Math.floor(slotStartMinutes / 60);
                     const slotStartMins = slotStartMinutes % 60;
-                    const slotEndMinutes = slotStartMinutes + 30;
+                    const slotEndMinutes = slotStartMinutes + 15;
                     const slotEndHours = Math.floor(slotEndMinutes / 60);
                     const slotEndMins = slotEndMinutes % 60;
                     
@@ -546,7 +546,7 @@ const AutoSchedule = () => {
                   }
                   
                   if (allSlotsAvailable) {
-                    // Create individual schedule entries for each 30-minute slot
+                    // Create individual schedule entries for each 15-minute slot
                     for (const day of requiredDays) {
                       let slotIndex = 0;
                       for (const slot of individualSlots) {

@@ -144,10 +144,6 @@ const TeacherManagement = () => {
         setError('At least one subject is required');
         return;
       }
-      if (formData.subjects.length > 2) {
-        setError('A teacher can only be assigned to a maximum of 2 subjects');
-        return;
-      }
       if (!formData.availableStartTime.trim()) {
         setError('Available start time is required');
         return;
@@ -333,12 +329,12 @@ const TeacherManagement = () => {
               </Grid>
               <Grid item xs={12}>
                 <FormControl fullWidth required>
-                  <InputLabel>Subjects (Max 2)</InputLabel>
+                  <InputLabel>Subjects</InputLabel>
                   <Select
                     multiple
                     value={formData.subjects}
                     onChange={handleChange('subjects')}
-                    label="Subjects (Max 2)"
+                    label="Subjects"
                     renderValue={(selected) => (
                       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                         {selected.map((value) => (
@@ -351,7 +347,6 @@ const TeacherManagement = () => {
                       <MenuItem 
                         key={subject.id} 
                         value={subject.name}
-                        disabled={formData.subjects.length >= 2 && !formData.subjects.includes(subject.name)}
                       >
                         {subject.name} ({subject.code})
                       </MenuItem>
@@ -361,11 +356,6 @@ const TeacherManagement = () => {
                 {formData.subjects.length === 0 && (
                   <Typography variant="caption" color="error">
                     Please select at least one subject
-                  </Typography>
-                )}
-                {formData.subjects.length > 2 && (
-                  <Typography variant="caption" color="error">
-                    Maximum 2 subjects allowed
                   </Typography>
                 )}
               </Grid>

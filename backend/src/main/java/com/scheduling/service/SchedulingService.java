@@ -120,9 +120,9 @@ public class SchedulingService {
     /**
      * Generate scheduling requests based on sections and subjects
      * Note: durationPerWeek is stored as HOURS in the database
-     * We convert it to 30-minute blocks (1 hour = 2 blocks, 1.5 hours = 3 blocks, etc.)
-     * Splits duration into combinations of 1-hour (2 blocks) and 1.5-hour (3 blocks) schedules
-     * Example: 3 hours = 6 blocks → 2 × 1 hour + 1 × 1.5 hour = 3 schedules
+     * We convert it to 15-minute blocks (1 hour = 4 blocks, 1.5 hours = 6 blocks, etc.)
+     * Splits duration into combinations of 1-hour (4 blocks) and 1.5-hour (6 blocks) schedules
+     * Example: 3 hours = 12 blocks → 3 × 1 hour = 3 schedules
      */
     private List<SchedulingRequest> generateSchedulingRequests(List<Section> sections, List<Subject> subjects) {
         List<SchedulingRequest> requests = new ArrayList<>();
@@ -131,13 +131,13 @@ public class SchedulingService {
             // For now, assume all sections need all subjects
             // In a real system, this would come from section-subject assignments
             for (Subject subject : subjects) {
-                // Convert durationPerWeek from HOURS to 30-minute BLOCKS
-                // If durationPerWeek = 3 hours, that's 6 blocks (3 × 2 = 6)
+                // Convert durationPerWeek from HOURS to 15-minute BLOCKS
+                // If durationPerWeek = 3 hours, that's 12 blocks (3 × 4 = 12)
                 int durationInHours = subject.getDurationPerWeek();
-                int durationInBlocks = durationInHours * 2;
+                int durationInBlocks = durationInHours * 4;
                 
                 System.out.println("📚 Subject: " + subject.getName() + 
-                                 " - Duration: " + durationInHours + " hours = " + durationInBlocks + " blocks (30-min each)");
+                                 " - Duration: " + durationInHours + " hours = " + durationInBlocks + " blocks (15-min each)");
                 
                 // Split duration into combinations of 1-hour and 1.5-hour schedules
                 List<Integer> scheduleBlocks = splitDurationIntoScheduleBlocks(durationInBlocks);
@@ -155,7 +155,7 @@ public class SchedulingService {
                     request.setRoomType(subject.getRequiredRoomType());
                     request.setPriority(subject.getPriority());
                     request.setDurationIndex(scheduleIndex++); // Track which schedule this is (0, 1, 2, etc.)
-                    request.setConsecutiveHours(blocks); // Number of 30-minute blocks for this schedule (2 = 1 hour, 3 = 1.5 hours)
+                    request.setConsecutiveHours(blocks); // Number of 15-minute blocks for this schedule (4 = 1 hour, 6 = 1.5 hours, 2 = 30 min, 3 = 45 min)
                     
                     // Validate request was created correctly
                     if (request.getConsecutiveHours() == null || request.getConsecutiveHours() != blocks) {
@@ -165,7 +165,7 @@ public class SchedulingService {
                     System.out.println("📝 Created request " + request.getDurationIndex() + 
                                      " for " + subject.getName() + 
                                      " with " + blocks + " consecutive blocks (" + 
-                                     (blocks == 1 ? "30 min" : blocks == 2 ? "1 hour" : blocks == 3 ? "1.5 hours" : (blocks * 30) + " minutes") + ")" +
+                                     (blocks == 1 ? "15 min" : blocks == 2 ? "30 min" : blocks == 3 ? "45 min" : blocks == 4 ? "1 hour" : blocks == 6 ? "1.5 hours" : (blocks * 15) + " minutes") + ")" +
                                      " [consecutiveHours=" + request.getConsecutiveHours() + "]");
                     
                     requests.add(request);
@@ -176,7 +176,7 @@ public class SchedulingService {
                 if (totalBlocksCreated != durationInBlocks) {
                     System.out.println("❌ ERROR: Total blocks mismatch! Expected " + durationInBlocks + ", created " + totalBlocksCreated);
                 } else {
-                    System.out.println("✅ Total blocks verified: " + totalBlocksCreated + " blocks = " + (totalBlocksCreated * 0.5) + " hours");
+                    System.out.println("✅ Total blocks verified: " + totalBlocksCreated + " blocks = " + (totalBlocksCreated * 0.25) + " hours");
                 }
             }
         }
@@ -195,13 +195,13 @@ public class SchedulingService {
     }
     
     /**
-     * Split total duration (in 30-minute blocks) into combinations of 1-hour (2 blocks) and 1.5-hour (3 blocks) schedules
+     * Split total duration (in 15-minute blocks) into combinations of 1-hour (4 blocks) and 1.5-hour (6 blocks) schedules
      * Strategy: Prefer 1-hour schedules, use 1.5-hour when remaining blocks can be optimally split
      * Examples:
-     * - 6 blocks (3 hours) → [2, 2, 2] = 3 × 1 hour (OR [3, 3] = 2 × 1.5 hour if preferred)
-     * - 5 blocks (2.5 hours) → [2, 3] = 1 × 1 hour + 1 × 1.5 hour
-     * - 4 blocks (2 hours) → [2, 2] = 2 × 1 hour
-     * - 7 blocks (3.5 hours) → [2, 2, 3] = 2 × 1 hour + 1 × 1.5 hour
+     * - 12 blocks (3 hours) → [4, 4, 4] = 3 × 1 hour (OR [6, 6] = 2 × 1.5 hour if preferred)
+     * - 10 blocks (2.5 hours) → [4, 6] = 1 × 1 hour + 1 × 1.5 hour
+     * - 8 blocks (2 hours) → [4, 4] = 2 × 1 hour
+     * - 14 blocks (3.5 hours) → [4, 4, 6] = 2 × 1 hour + 1 × 1.5 hour
      */
     private List<Integer> splitDurationIntoScheduleBlocks(int totalBlocks) {
         List<Integer> result = new ArrayList<>();
@@ -209,54 +209,77 @@ public class SchedulingService {
         
         System.out.println("🔀 Splitting " + totalBlocks + " blocks into schedules...");
         
-        // Special case: 6 blocks (3 hours) → create 3 × 1 hour schedules
-        if (totalBlocks == 6) {
-            // For exactly 6 blocks (3 hours), create 3 × 1 hour schedules
-            result.add(2); // 1 hour (2 blocks)
-            result.add(2); // 1 hour (2 blocks)
-            result.add(2); // 1 hour (2 blocks)
-            // Total: 6 blocks = 3 hours exactly, 3 schedules
-            System.out.println("   Result: " + result + " (3 × 1 hour = 6 blocks = 3 hours)");
+        // Special case: 12 blocks (3 hours) → create 3 × 1 hour schedules
+        if (totalBlocks == 12) {
+            // For exactly 12 blocks (3 hours), create 3 × 1 hour schedules
+            result.add(4); // 1 hour (4 blocks)
+            result.add(4); // 1 hour (4 blocks)
+            result.add(4); // 1 hour (4 blocks)
+            // Total: 12 blocks = 3 hours exactly, 3 schedules
+            System.out.println("   Result: " + result + " (3 × 1 hour = 12 blocks = 3 hours)");
             return result;
         }
         
-        // Special case: 7 blocks (3.5 hours) → can use pattern: 2 × 1 hour + 1 × 1.5 hour = 3 schedules
-        if (totalBlocks == 7) {
-            result.add(2); // 1 hour
-            result.add(2); // 1 hour
-            result.add(3); // 1.5 hours
-            // Total: 7 blocks = 3.5 hours, 3 schedules
+        // Special case: 14 blocks (3.5 hours) → can use pattern: 2 × 1 hour + 1 × 1.5 hour = 3 schedules
+        if (totalBlocks == 14) {
+            result.add(4); // 1 hour
+            result.add(4); // 1 hour
+            result.add(6); // 1.5 hours
+            // Total: 14 blocks = 3.5 hours, 3 schedules
             return result;
         }
         
         // General algorithm for other durations
         while (remaining > 0) {
             if (remaining == 1) {
-                result.add(1); // 30 minutes (fallback)
+                result.add(1); // 15 minutes (fallback)
                 remaining -= 1;
             } else if (remaining == 2) {
-                result.add(2); // 1 hour
+                result.add(2); // 30 minutes
                 remaining -= 2;
             } else if (remaining == 3) {
-                result.add(3); // 1.5 hours
+                result.add(3); // 45 minutes
                 remaining -= 3;
             } else if (remaining == 4) {
-                result.add(2); // 1 hour
-                result.add(2); // 1 hour
+                result.add(4); // 1 hour
                 remaining -= 4;
             } else if (remaining == 5) {
-                result.add(2); // 1 hour
-                result.add(3); // 1.5 hours
+                result.add(4); // 1 hour
+                result.add(1); // 15 minutes
                 remaining -= 5;
-            } else if (remaining >= 6) {
-                // For 6 or more, prefer combinations
-                // Use 1.5-hour if it leaves a clean split, otherwise use 1-hour
-                if ((remaining - 3) % 2 == 0 && remaining - 3 >= 2) {
-                    result.add(3); // 1.5 hours
-                    remaining -= 3;
+            } else if (remaining == 6) {
+                result.add(6); // 1.5 hours
+                remaining -= 6;
+            } else if (remaining == 7) {
+                result.add(4); // 1 hour
+                result.add(3); // 45 minutes
+                remaining -= 7;
+            } else if (remaining == 8) {
+                result.add(4); // 1 hour
+                result.add(4); // 1 hour
+                remaining -= 8;
+            } else if (remaining == 9) {
+                result.add(6); // 1.5 hours
+                result.add(3); // 45 minutes
+                remaining -= 9;
+            } else if (remaining == 10) {
+                result.add(4); // 1 hour
+                result.add(6); // 1.5 hours
+                remaining -= 10;
+            } else if (remaining == 11) {
+                result.add(4); // 1 hour
+                result.add(4); // 1 hour
+                result.add(3); // 45 minutes
+                remaining -= 11;
+            } else if (remaining >= 12) {
+                // For 12 or more, prefer combinations
+                // Use 1.5-hour (6 blocks) if it leaves a clean split, otherwise use 1-hour (4 blocks)
+                if ((remaining - 6) % 4 == 0 && remaining - 6 >= 4) {
+                    result.add(6); // 1.5 hours
+                    remaining -= 6;
                 } else {
-                    result.add(2); // 1 hour
-                    remaining -= 2;
+                    result.add(4); // 1 hour
+                    remaining -= 4;
                 }
             }
         }
@@ -282,22 +305,40 @@ public class SchedulingService {
             DayOfWeek.THURSDAY, DayOfWeek.FRIDAY
         );
         
-        // 30-minute time slots to support 1.5 hour schedules
+        // 15-minute time slots to support flexible scheduling
+        // Excludes break times: 9:00-9:15 (morning break), 12:15-13:15 (lunch), 16:15-16:30 (afternoon break)
         List<TimeSlot> timeSlots = Arrays.asList(
-            new TimeSlot(LocalTime.of(8, 0), LocalTime.of(8, 30)),
-            new TimeSlot(LocalTime.of(8, 30), LocalTime.of(9, 0)),
-            new TimeSlot(LocalTime.of(9, 0), LocalTime.of(9, 30)),
-            new TimeSlot(LocalTime.of(9, 30), LocalTime.of(10, 0)),
-            new TimeSlot(LocalTime.of(10, 0), LocalTime.of(10, 30)),
-            new TimeSlot(LocalTime.of(10, 30), LocalTime.of(11, 0)),
-            new TimeSlot(LocalTime.of(11, 0), LocalTime.of(11, 30)),
-            new TimeSlot(LocalTime.of(11, 30), LocalTime.of(12, 0)),
-            new TimeSlot(LocalTime.of(13, 0), LocalTime.of(13, 30)),
-            new TimeSlot(LocalTime.of(13, 30), LocalTime.of(14, 0)),
-            new TimeSlot(LocalTime.of(14, 0), LocalTime.of(14, 30)),
-            new TimeSlot(LocalTime.of(14, 30), LocalTime.of(15, 0)),
-            new TimeSlot(LocalTime.of(15, 0), LocalTime.of(15, 30)),
-            new TimeSlot(LocalTime.of(15, 30), LocalTime.of(16, 0))
+            new TimeSlot(LocalTime.of(8, 0), LocalTime.of(8, 15)),
+            new TimeSlot(LocalTime.of(8, 15), LocalTime.of(8, 30)),
+            new TimeSlot(LocalTime.of(8, 30), LocalTime.of(8, 45)),
+            new TimeSlot(LocalTime.of(8, 45), LocalTime.of(9, 0)),
+            // Break: 9:00-9:15 (excluded)
+            new TimeSlot(LocalTime.of(9, 15), LocalTime.of(9, 30)),
+            new TimeSlot(LocalTime.of(9, 30), LocalTime.of(9, 45)),
+            new TimeSlot(LocalTime.of(9, 45), LocalTime.of(10, 0)),
+            new TimeSlot(LocalTime.of(10, 0), LocalTime.of(10, 15)),
+            new TimeSlot(LocalTime.of(10, 15), LocalTime.of(10, 30)),
+            new TimeSlot(LocalTime.of(10, 30), LocalTime.of(10, 45)),
+            new TimeSlot(LocalTime.of(10, 45), LocalTime.of(11, 0)),
+            new TimeSlot(LocalTime.of(11, 0), LocalTime.of(11, 15)),
+            new TimeSlot(LocalTime.of(11, 15), LocalTime.of(11, 30)),
+            new TimeSlot(LocalTime.of(11, 30), LocalTime.of(11, 45)),
+            new TimeSlot(LocalTime.of(11, 45), LocalTime.of(12, 0)),
+            new TimeSlot(LocalTime.of(12, 0), LocalTime.of(12, 15)),
+            // Lunch: 12:15-13:15 (excluded)
+            new TimeSlot(LocalTime.of(13, 15), LocalTime.of(13, 30)),
+            new TimeSlot(LocalTime.of(13, 30), LocalTime.of(13, 45)),
+            new TimeSlot(LocalTime.of(13, 45), LocalTime.of(14, 0)),
+            new TimeSlot(LocalTime.of(14, 0), LocalTime.of(14, 15)),
+            new TimeSlot(LocalTime.of(14, 15), LocalTime.of(14, 30)),
+            new TimeSlot(LocalTime.of(14, 30), LocalTime.of(14, 45)),
+            new TimeSlot(LocalTime.of(14, 45), LocalTime.of(15, 0)),
+            new TimeSlot(LocalTime.of(15, 0), LocalTime.of(15, 15)),
+            new TimeSlot(LocalTime.of(15, 15), LocalTime.of(15, 30)),
+            new TimeSlot(LocalTime.of(15, 30), LocalTime.of(15, 45)),
+            new TimeSlot(LocalTime.of(15, 45), LocalTime.of(16, 0)),
+            new TimeSlot(LocalTime.of(16, 0), LocalTime.of(16, 15))
+            // Break: 16:15-16:30 (excluded)
         );
         
         for (SchedulingRequest request : requests) {
@@ -321,7 +362,7 @@ public class SchedulingService {
                                  .add(schedule.getSubject().getName());
                 
                 // Debug logging to verify same-day subject prevention
-                double totalMinutes = request.getConsecutiveHours() * 30.0;
+                double totalMinutes = request.getConsecutiveHours() * 15.0;
                 String durationStr = totalMinutes >= 60 ? 
                     String.format("%.1f hours", totalMinutes / 60.0) : 
                     String.format("%.0f minutes", totalMinutes);
@@ -331,7 +372,7 @@ public class SchedulingService {
                                  " at " + schedule.getStartTime() + "-" + schedule.getEndTime() +
                                  " (Schedule " + (request.getDurationIndex() + 1) + ", " + durationStr + ")");
             } else {
-                double totalMinutes = request.getConsecutiveHours() * 30.0;
+                double totalMinutes = request.getConsecutiveHours() * 15.0;
                 String durationStr = totalMinutes >= 60 ? 
                     String.format("%.1f hours", totalMinutes / 60.0) : 
                     String.format("%.0f minutes", totalMinutes);
@@ -534,7 +575,7 @@ public class SchedulingService {
             for (int slotIndex = 0; slotIndex < timeSlots.size(); slotIndex++) {
                 TimeSlot timeSlot = timeSlots.get(slotIndex);
                 
-                // Check if we have enough consecutive slots for multi-block schedules (1 hour = 2 blocks, 1.5 hours = 3 blocks)
+                // Check if we have enough consecutive slots for multi-block schedules (1 hour = 4 blocks, 1.5 hours = 6 blocks)
                 if (request.getConsecutiveHours() > 1) {
                     if (slotIndex + request.getConsecutiveHours() > timeSlots.size()) {
                         continue; // Not enough slots remaining
@@ -566,20 +607,30 @@ public class SchedulingService {
                             }
                         }
                         
-                        if (allSlotsAvailable) {
+                        // Check if any of the slots are during break time
+                        boolean hasBreakTime = false;
+                        for (int i = 0; i < request.getConsecutiveHours(); i++) {
+                            TimeSlot checkSlot = timeSlots.get(slotIndex + i);
+                            if (isBreakTime(checkSlot.getStartTime(), checkSlot.getEndTime())) {
+                                hasBreakTime = true;
+                                break;
+                            }
+                        }
+                        
+                        if (allSlotsAvailable && !hasBreakTime) {
                             // Create schedule spanning the required number of consecutive blocks
                             Schedule schedule = new Schedule();
                             schedule.setDate(LocalDate.now()); // Use current date as base
                             schedule.setStartTime(timeSlot.getStartTime());
                             
-                            // Calculate end time based on number of consecutive 30-minute blocks
+                            // Calculate end time based on number of consecutive 15-minute blocks
                             Integer numBlocks = request.getConsecutiveHours();
                             if (numBlocks == null) {
                                 System.out.println("❌ ERROR: consecutiveHours is null! Defaulting to 1 block");
                                 numBlocks = 1;
                             }
                             
-                            System.out.println("🔧 Creating schedule with " + numBlocks + " consecutive blocks (30-min each)");
+                            System.out.println("🔧 Creating schedule with " + numBlocks + " consecutive blocks (15-min each)");
                             System.out.println("   Slot index: " + slotIndex + ", Total slots: " + timeSlots.size());
                             
                             if (numBlocks > 1) {
@@ -591,11 +642,11 @@ public class SchedulingService {
                                 TimeSlot lastSlot = timeSlots.get(slotIndex + numBlocks - 1);
                                 schedule.setEndTime(lastSlot.getEndTime());
                                 System.out.println("   Start: " + timeSlot.getStartTime() + ", End: " + lastSlot.getEndTime() + 
-                                                 " (" + numBlocks + " blocks = " + (numBlocks * 30) + " minutes)");
+                                                 " (" + numBlocks + " blocks = " + (numBlocks * 15) + " minutes)");
                             } else {
-                                schedule.setEndTime(timeSlot.getEndTime()); // Single 30-minute block
+                                schedule.setEndTime(timeSlot.getEndTime()); // Single 15-minute block
                                 System.out.println("   Start: " + timeSlot.getStartTime() + ", End: " + timeSlot.getEndTime() + 
-                                                 " (1 block = 30 minutes)");
+                                                 " (1 block = 15 minutes)");
                             }
                             
                             schedule.setDayOfWeek(day);
@@ -609,7 +660,7 @@ public class SchedulingService {
                             
                             // Validate the schedule duration matches the request
                             long actualDurationMinutes = java.time.Duration.between(schedule.getStartTime(), schedule.getEndTime()).toMinutes();
-                            long expectedDurationMinutes = request.getConsecutiveHours() * 30L;
+                            long expectedDurationMinutes = request.getConsecutiveHours() * 15L;
                             
                             if (actualDurationMinutes != expectedDurationMinutes) {
                                 System.out.println("⚠️ ERROR: Schedule duration mismatch!");
@@ -628,7 +679,7 @@ public class SchedulingService {
                             }
                             
                             // Create notes showing the actual duration
-                            double totalMinutes = request.getConsecutiveHours() * 30.0;
+                            double totalMinutes = request.getConsecutiveHours() * 15.0;
                             String durationStr = totalMinutes >= 60 ? 
                                 String.format("%.1f hours", totalMinutes / 60.0) : 
                                 String.format("%.0f minutes", totalMinutes);
@@ -662,22 +713,36 @@ public class SchedulingService {
     private boolean areConsecutiveSlotsAvailable(DayOfWeek day, int startSlotIndex, int consecutiveHours,
                                                List<Teacher> suitableTeachers, List<Classroom> suitableClassrooms,
                                                Set<String> usedSlots) {
-        // 30-minute time slots to support 1.5 hour schedules
+        // 15-minute time slots to support flexible scheduling
         List<TimeSlot> timeSlots = Arrays.asList(
-            new TimeSlot(LocalTime.of(8, 0), LocalTime.of(8, 30)),
-            new TimeSlot(LocalTime.of(8, 30), LocalTime.of(9, 0)),
-            new TimeSlot(LocalTime.of(9, 0), LocalTime.of(9, 30)),
-            new TimeSlot(LocalTime.of(9, 30), LocalTime.of(10, 0)),
-            new TimeSlot(LocalTime.of(10, 0), LocalTime.of(10, 30)),
-            new TimeSlot(LocalTime.of(10, 30), LocalTime.of(11, 0)),
-            new TimeSlot(LocalTime.of(11, 0), LocalTime.of(11, 30)),
-            new TimeSlot(LocalTime.of(11, 30), LocalTime.of(12, 0)),
-            new TimeSlot(LocalTime.of(13, 0), LocalTime.of(13, 30)),
-            new TimeSlot(LocalTime.of(13, 30), LocalTime.of(14, 0)),
-            new TimeSlot(LocalTime.of(14, 0), LocalTime.of(14, 30)),
-            new TimeSlot(LocalTime.of(14, 30), LocalTime.of(15, 0)),
-            new TimeSlot(LocalTime.of(15, 0), LocalTime.of(15, 30)),
-            new TimeSlot(LocalTime.of(15, 30), LocalTime.of(16, 0))
+            new TimeSlot(LocalTime.of(8, 0), LocalTime.of(8, 15)),
+            new TimeSlot(LocalTime.of(8, 15), LocalTime.of(8, 30)),
+            new TimeSlot(LocalTime.of(8, 30), LocalTime.of(8, 45)),
+            new TimeSlot(LocalTime.of(8, 45), LocalTime.of(9, 0)),
+            new TimeSlot(LocalTime.of(9, 0), LocalTime.of(9, 15)),
+            new TimeSlot(LocalTime.of(9, 15), LocalTime.of(9, 30)),
+            new TimeSlot(LocalTime.of(9, 30), LocalTime.of(9, 45)),
+            new TimeSlot(LocalTime.of(9, 45), LocalTime.of(10, 0)),
+            new TimeSlot(LocalTime.of(10, 0), LocalTime.of(10, 15)),
+            new TimeSlot(LocalTime.of(10, 15), LocalTime.of(10, 30)),
+            new TimeSlot(LocalTime.of(10, 30), LocalTime.of(10, 45)),
+            new TimeSlot(LocalTime.of(10, 45), LocalTime.of(11, 0)),
+            new TimeSlot(LocalTime.of(11, 0), LocalTime.of(11, 15)),
+            new TimeSlot(LocalTime.of(11, 15), LocalTime.of(11, 30)),
+            new TimeSlot(LocalTime.of(11, 30), LocalTime.of(11, 45)),
+            new TimeSlot(LocalTime.of(11, 45), LocalTime.of(12, 0)),
+            new TimeSlot(LocalTime.of(13, 0), LocalTime.of(13, 15)),
+            new TimeSlot(LocalTime.of(13, 15), LocalTime.of(13, 30)),
+            new TimeSlot(LocalTime.of(13, 30), LocalTime.of(13, 45)),
+            new TimeSlot(LocalTime.of(13, 45), LocalTime.of(14, 0)),
+            new TimeSlot(LocalTime.of(14, 0), LocalTime.of(14, 15)),
+            new TimeSlot(LocalTime.of(14, 15), LocalTime.of(14, 30)),
+            new TimeSlot(LocalTime.of(14, 30), LocalTime.of(14, 45)),
+            new TimeSlot(LocalTime.of(14, 45), LocalTime.of(15, 0)),
+            new TimeSlot(LocalTime.of(15, 0), LocalTime.of(15, 15)),
+            new TimeSlot(LocalTime.of(15, 15), LocalTime.of(15, 30)),
+            new TimeSlot(LocalTime.of(15, 30), LocalTime.of(15, 45)),
+            new TimeSlot(LocalTime.of(15, 45), LocalTime.of(16, 0))
         );
         
         // Check if all consecutive slots are available for at least one teacher-classroom combination
@@ -705,13 +770,47 @@ public class SchedulingService {
     }
     
     /**
-     * Check if teacher is available for consecutive 30-minute blocks
+     * Check if a time slot overlaps with a break period
+     * Break periods: 9:00-9:15 (morning), 12:15-13:15 (lunch), 16:15-16:30 (afternoon)
+     */
+    private boolean isBreakTime(LocalTime startTime, LocalTime endTime) {
+        LocalTime morningBreakStart = LocalTime.of(9, 0);
+        LocalTime morningBreakEnd = LocalTime.of(9, 15);
+        LocalTime lunchStart = LocalTime.of(12, 15);
+        LocalTime lunchEnd = LocalTime.of(13, 15);
+        LocalTime afternoonBreakStart = LocalTime.of(16, 15);
+        LocalTime afternoonBreakEnd = LocalTime.of(16, 30);
+        
+        // Check if slot overlaps with morning break (9:00-9:15)
+        if (!startTime.isAfter(morningBreakEnd) && !endTime.isBefore(morningBreakStart)) {
+            return true;
+        }
+        
+        // Check if slot overlaps with lunch (12:15-13:15)
+        if (!startTime.isAfter(lunchEnd) && !endTime.isBefore(lunchStart)) {
+            return true;
+        }
+        
+        // Check if slot overlaps with afternoon break (16:15-16:30)
+        if (!startTime.isAfter(afternoonBreakEnd) && !endTime.isBefore(afternoonBreakStart)) {
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Check if teacher is available for consecutive 15-minute blocks
      */
     private boolean isTeacherAvailableForConsecutiveHours(Teacher teacher, DayOfWeek day, int startSlotIndex,
                                                         int consecutiveHours, List<TimeSlot> timeSlots) {
         // Check if teacher is available for all consecutive blocks
         for (int i = 0; i < consecutiveHours; i++) {
             TimeSlot slot = timeSlots.get(startSlotIndex + i);
+            // Skip if this slot is during a break
+            if (isBreakTime(slot.getStartTime(), slot.getEndTime())) {
+                return false;
+            }
             if (!isTeacherAvailable(teacher, day, slot)) {
                 return false;
             }
@@ -720,7 +819,7 @@ public class SchedulingService {
     }
     
     /**
-     * Mark all consecutive 30-minute slots as used
+     * Mark all consecutive 15-minute slots as used
      */
     private void markConsecutiveSlotsAsUsed(Schedule schedule, int consecutiveHours, List<TimeSlot> timeSlots, Set<String> usedSlots) {
         // Find the start slot index
@@ -837,7 +936,7 @@ public class SchedulingService {
         private String roomType;
         private Integer priority;
         private Integer durationIndex;
-        private Integer consecutiveHours; // Number of consecutive 30-minute blocks needed
+        private Integer consecutiveHours; // Number of consecutive 15-minute blocks needed
         
         // Constructors
         public SchedulingRequest() {}
