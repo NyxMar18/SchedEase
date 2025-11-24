@@ -1493,7 +1493,7 @@ const ScheduleViewer = () => {
                               ` (${(durationMinutes / 60).toFixed(1)}h)` : 
                               ` (${durationMinutes}min)`;
                           }
-                          
+                             //happy
                           const isDragOver = dragOverSlot && 
                             dragOverSlot.day === day && 
                             dragOverSlot.timeSlot.start === timeSlot.start;
