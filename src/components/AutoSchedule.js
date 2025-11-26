@@ -733,13 +733,42 @@ const AutoSchedule = () => {
             continue;
           }
 
+          // Sort available days by usage count to ensure even distribution (prioritize days with fewer sessions)
+          // This ensures Friday and other days get fair treatment, especially when scheduling the second session
+          const sortedAvailableDays = availableDaysForSession.sort((dayA, dayB) => {
+            const countA = dayUsage[dayA] || 0;
+            const countB = dayUsage[dayB] || 0;
+            
+            // If this is the second session and we have multiple available days, try to balance distribution
+            if (request.sessionNumber === 2 && availableDaysForSession.length > 1) {
+              // Calculate average usage across all days to find the most underused day
+              const allDayCounts = request.availableDays.map(d => dayUsage[d] || 0);
+              const avgUsage = allDayCounts.reduce((sum, count) => sum + count, 0) / allDayCounts.length;
+              
+              // Prioritize days that are below average usage
+              const aBelowAvg = countA < avgUsage;
+              const bBelowAvg = countB < avgUsage;
+              if (aBelowAvg && !bBelowAvg) return -1;
+              if (!aBelowAvg && bBelowAvg) return 1;
+            }
+            
+            // If counts are equal, prioritize Friday (FRIDAY) to ensure it gets sessions
+            if (countA === countB) {
+              if (dayA === 'FRIDAY') return -1;
+              if (dayB === 'FRIDAY') return 1;
+            }
+            return countA - countB; // Days with fewer sessions first
+          });
+          
+          console.log(`📅 Available days for session ${request.sessionNumber}: ${sortedAvailableDays.join(', ')} (sorted by usage: ${sortedAvailableDays.map(d => `${d}(${dayUsage[d] || 0})`).join(', ')})`);
+
           // Try to find a time slot that works for ONE available day
         while (!assigned && attempts < maxAttempts) {
           const timeSlot = getLeastUsedTimeSlot(availableTimeSlots);
           
             if (timeSlot) {
-              // Try each available day for this session
-              for (const day of availableDaysForSession) {
+              // Try each available day for this session, starting with least used days
+              for (const day of sortedAvailableDays) {
                 if (assigned) break;
                 
                 // Check if this time slot is available on this day
