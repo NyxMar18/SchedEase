@@ -290,7 +290,14 @@ const AutoSchedule = () => {
         const existingRes = await scheduleAPI.getAll();
         const allSchedules = existingRes.data || [];
         // Filter to only include schedules from the selected school year
-        existingSchedules = allSchedules.filter(schedule => schedule.schoolYearId === selectedSchoolYear);
+        // Handle different possible field names and types (schoolYearId, schoolYear.id, etc.)
+        existingSchedules = allSchedules.filter(schedule => {
+          const scheduleSchoolYearId = schedule.schoolYearId || 
+                                       schedule.schoolYear?.id || 
+                                       (typeof schedule.schoolYear === 'string' ? schedule.schoolYear : null);
+          // Convert both to strings for comparison to handle type mismatches
+          return String(scheduleSchoolYearId) === String(selectedSchoolYear);
+        });
         console.log(`📋 Loaded ${existingSchedules.length} existing schedules for conflict checking (school year: ${selectedSchoolYear})`);
         console.log(`📊 Total schedules in database: ${allSchedules.length}, filtered to ${existingSchedules.length} for selected school year`);
       } catch (error) {
@@ -622,16 +629,45 @@ const AutoSchedule = () => {
           
           console.log(`🏫 Room type configuration for ${subject.name}:`, roomTypeConfigs);
           
-          // Process each room type configuration separately
-          for (const roomTypeConfig of roomTypeConfigs) {
+          // Fixed: All subjects are 3 hours total
+          const fixedTotalDuration = 3; // Fixed 3 hours per subject
+          
+          // If subject has multiple room types, create one session per room type (max 2 sessions)
+          // If subject has one room type, create 2 sessions (both using that room type)
+          // Each session is 1.5 hours
+          const sessionDuration = 1.5; // Each session is 1.5 hours (6 × 15-minute slots)
+          // Limit to 2 sessions maximum (3 hours total = 2 × 1.5h)
+          // If more than 2 room types, use the first 2
+          const numberOfSessions = 2; // Always 2 sessions for 3 hours total
+          const roomTypesToUse = roomTypeConfigs.length > 2 ? roomTypeConfigs.slice(0, 2) : roomTypeConfigs;
+          
+          // Validate that we have at least one room type
+          if (roomTypesToUse.length === 0) {
+            console.log(`❌ No room types configured for subject: ${subject.name}`);
+            failedSchedulesList.push({
+              section: section.sectionName,
+              subject: subject.name,
+              reason: 'No room type configured',
+              details: `Subject ${subject.name} has no required room types`,
+              type: 'missing_room_type',
+              resolution: `Configure at least one room type for ${subject.name}`
+            });
+            continue;
+          }
+          
+          // Get all available days for scheduling
+          const allAvailableDays = getAvailableDaysForPattern('DAILY');
+          
+          // Create scheduling requests: one session per room type (or 2 sessions if only one room type)
+          for (let sessionIndex = 0; sessionIndex < numberOfSessions; sessionIndex++) {
+            // Determine which room type to use for this session
+            // If multiple room types: use different room type for each session
+            // If single room type: reuse it for both sessions
+            const roomTypeIndex = roomTypesToUse.length > 1 ? sessionIndex : 0;
+            const roomTypeConfig = roomTypesToUse[roomTypeIndex];
             const requiredRoomType = roomTypeConfig.type;
             
-            // Fixed: All subjects are 3 hours, divided into 2 sessions of 1.5 hours each
-            const fixedTotalDuration = 3; // Fixed 3 hours per subject
-            const sessionDuration = 1.5; // Each session is 1.5 hours (6 × 15-minute slots)
-            const numberOfSessions = 2; // 2 sessions per week
-            
-            console.log(`🏫 Looking for classroom for subject: ${subject.name} (room type: ${requiredRoomType}, fixed duration: ${fixedTotalDuration}h = ${numberOfSessions} sessions × ${sessionDuration}h)`);
+            console.log(`🏫 Looking for classroom for session ${sessionIndex + 1}/${numberOfSessions} of ${subject.name} (room type: ${requiredRoomType}, duration: ${sessionDuration}h)`);
             
             const suitableClassrooms = classrooms.filter(classroom => {
               const classroomType = (classroom.roomType || '').toLowerCase().trim();
@@ -645,7 +681,7 @@ const AutoSchedule = () => {
               );
             });
 
-            console.log(`🏫 Found ${suitableClassrooms.length} suitable classrooms for ${subject.name} (${requiredRoomType})`);
+            console.log(`🏫 Found ${suitableClassrooms.length} suitable classrooms for ${subject.name} session ${sessionIndex + 1} (${requiredRoomType})`);
 
             if (suitableClassrooms.length === 0) {
               console.log(`❌ No classroom found for subject: ${subject.name} (room type: ${requiredRoomType})`);
@@ -653,42 +689,35 @@ const AutoSchedule = () => {
                 section: section.sectionName,
                 subject: subject.name,
                 reason: 'No classroom available',
-                details: `No classroom found for room type: ${requiredRoomType}`,
+                details: `No classroom found for room type: ${requiredRoomType} (session ${sessionIndex + 1})`,
                 type: 'missing_classroom',
                 resolution: `Add a classroom with room type: ${requiredRoomType}`
               });
               continue;
             }
 
-            // Get all available days for scheduling the 2 sessions
-            const allAvailableDays = getAvailableDaysForPattern('DAILY');
             const selectedClassroom = getLeastUsedClassroom(suitableClassrooms);
             
-            // Create 2 separate scheduling requests, one for each session
-            // Each session will be scheduled on a different day
-            for (let sessionIndex = 0; sessionIndex < numberOfSessions; sessionIndex++) {
-              // Each session gets scheduled on a single day (will be assigned during scheduling)
-              // We'll use all available days and let the scheduler pick the best day for each session
-              const availableDays = allAvailableDays; // Will be reduced to 1 day per session during scheduling
-              
-              console.log(`✅ Creating session ${sessionIndex + 1}/${numberOfSessions} (${sessionDuration}h) for ${section.sectionName} - ${subject.name} in ${requiredRoomType}`);
+            // Each session gets scheduled on a single day (will be assigned during scheduling)
+            const availableDays = allAvailableDays; // Will be reduced to 1 day per session during scheduling
             
+            console.log(`✅ Creating session ${sessionIndex + 1}/${numberOfSessions} (${sessionDuration}h) for ${section.sectionName} - ${subject.name} in ${requiredRoomType}`);
+          
             schedulingRequests.push({
               section,
               subject,
               teacher: teacherData || selectedUser,
               teacherUser: selectedUser,
               classroom: selectedClassroom,
-                durationIndex: sessionIndex,
-                totalDuration: sessionDuration, // Each session is 1.5 hours
-                sessionNumber: sessionIndex + 1, // Track which session this is (1 or 2)
-                totalSessions: numberOfSessions,
+              durationIndex: sessionIndex,
+              totalDuration: sessionDuration, // Each session is 1.5 hours
+              sessionNumber: sessionIndex + 1, // Track which session this is
+              totalSessions: numberOfSessions,
               availableDays: availableDays,
               uniformSchedule: true,
               suitableClassrooms,
               requiredRoomType: requiredRoomType // Store which room type this request is for
             });
-            }
           }
         }
       }
@@ -1102,9 +1131,14 @@ const AutoSchedule = () => {
       console.log('📋 Schedule API response:', existingSchedules);
       
       // Filter schedules by selected school year
-      const schedulesToDelete = existingSchedules.data.filter(schedule => 
-        schedule.schoolYearId === deleteSelectedSchoolYear
-      );
+      // Handle different possible field names and types (schoolYearId, schoolYear.id, etc.)
+      const schedulesToDelete = existingSchedules.data.filter(schedule => {
+        const scheduleSchoolYearId = schedule.schoolYearId || 
+                                     schedule.schoolYear?.id || 
+                                     (typeof schedule.schoolYear === 'string' ? schedule.schoolYear : null);
+        // Convert both to strings for comparison to handle type mismatches
+        return String(scheduleSchoolYearId) === String(deleteSelectedSchoolYear);
+      });
       
       console.log(`📋 Found ${schedulesToDelete.length} schedules to delete for school year: ${selectedSchoolYearName}`);
       
