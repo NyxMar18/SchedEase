@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Typography,
   Card,
   CardContent,
   Grid,
+  ButtonGroup,
   FormControl,
   InputLabel,
   Select,
@@ -41,6 +42,7 @@ import {
   Refresh as RefreshIcon,
   TableChart as TableChartIcon,
   CalendarViewWeek as CalendarViewWeekIcon,
+  ViewComfy as ViewComfyIcon,
   Edit as EditIcon,
   Save as SaveIcon,
   Cancel as CancelIcon,
@@ -82,6 +84,26 @@ const SUBJECT_COLORS = [
   { bg: '#d84315', text: '#ffffff' }, // Deep Orange
   { bg: '#00695c', text: '#ffffff' }, // Dark Teal
 ];
+
+const GRID_TEMPLATE_ROWS = [
+  { type: 'session', label: '7:30 – 9:00', start: '07:30', end: '09:00' },
+  { type: 'break', label: '9:00 – 9:15', text: 'BREAK' },
+  { type: 'session', label: '9:15 – 10:45', start: '09:15', end: '10:45' },
+  { type: 'session', label: '10:45 – 12:15', start: '10:45', end: '12:15' },
+  { type: 'break', label: '12:15 – 1:15', text: 'LUNCH' },
+  { type: 'session', label: '1:15 – 2:45', start: '13:15', end: '14:45' },
+  { type: 'session', label: '2:45 – 4:15', start: '14:45', end: '16:15' },
+  { type: 'break', label: '4:15 – 4:30', text: 'BREAK' },
+  { type: 'session', label: '4:30 – 6:00', start: '16:30', end: '18:00', defaultText: 'FREE TIME' },
+];
+
+const GRID_DAY_LABELS = {
+  MONDAY: 'Monday',
+  TUESDAY: 'Tuesday',
+  WEDNESDAY: 'Wednesday',
+  THURSDAY: 'Thursday',
+  FRIDAY: 'Friday',
+};
 
 // Function to get a consistent color for a subject
 const getSubjectColor = (subject) => {
@@ -231,6 +253,27 @@ const buildMergedSlotMap = (schedules, slots) => {
   return merged;
 };
 
+const TEMPLATE_VIEW_ROWS = [
+  { type: 'session', start: '07:30', end: '09:00' },
+  { type: 'break', start: '09:00', end: '09:15', label: 'BREAK' },
+  { type: 'session', start: '09:15', end: '10:45' },
+  { type: 'session', start: '10:45', end: '12:15' },
+  { type: 'lunch', start: '12:15', end: '13:15', label: 'LUNCH' },
+  { type: 'session', start: '13:15', end: '14:45' },
+  { type: 'session', start: '14:45', end: '16:15' },
+  { type: 'break', start: '16:15', end: '16:30', label: 'BREAK' },
+  { type: 'session', start: '16:30', end: '18:00' },
+];
+
+const TEMPLATE_DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
+const TEMPLATE_DAY_LABELS = {
+  MONDAY: 'Monday',
+  TUESDAY: 'Tuesday',
+  WEDNESDAY: 'Wednesday',
+  THURSDAY: 'Thursday',
+  FRIDAY: 'Friday',
+};
+
 const ScheduleViewer = () => {
   const { user, isAdmin, isTeacher } = useAuth();
   
@@ -293,7 +336,11 @@ const ScheduleViewer = () => {
   const [selectedTeacher, setSelectedTeacher] = useState('');
   const [selectedSection, setSelectedSection] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [viewMode, setViewMode] = useState('table'); // 'table', 'weekly'
+  const [viewMode, setViewMode] = useState('table'); // 'table', 'weekly', 'template'
+  const [gridPerspective, setGridPerspective] = useState('section'); // 'section' | 'teacher' | 'classroom'
+  const [gridSelectedSection, setGridSelectedSection] = useState('');
+  const [gridSelectedTeacher, setGridSelectedTeacher] = useState('');
+  const [gridSelectedClassroom, setGridSelectedClassroom] = useState('');
 
   // Edit states
   const [editingSchedule, setEditingSchedule] = useState(null);
@@ -333,6 +380,24 @@ const ScheduleViewer = () => {
   const [draggedSchedule, setDraggedSchedule] = useState(null);
   const [dragOverSlot, setDragOverSlot] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
+
+  useEffect(() => {
+    if (!gridSelectedSection && sections.length > 0) {
+      setGridSelectedSection(sections[0].id);
+    }
+  }, [sections, gridSelectedSection]);
+
+  useEffect(() => {
+    if (!gridSelectedTeacher && teachers.length > 0) {
+      setGridSelectedTeacher(teachers[0].id);
+    }
+  }, [teachers, gridSelectedTeacher]);
+
+  useEffect(() => {
+    if (!gridSelectedClassroom && classrooms.length > 0) {
+      setGridSelectedClassroom(classrooms[0].id);
+    }
+  }, [classrooms, gridSelectedClassroom]);
 
   // Fetch school years from Firebase
   const fetchSchoolYears = async () => {
@@ -1054,6 +1119,88 @@ const ScheduleViewer = () => {
     return ` (${minutes}min)`;
   };
 
+  const perspectiveSchedules = useMemo(() => {
+    let relevant = [...schedules];
+    if (selectedSchoolYear) {
+      relevant = relevant.filter(schedule => schedule.schoolYearId === selectedSchoolYear);
+    }
+    const aggregated = aggregateSchedulesBySession(relevant);
+
+    if (gridPerspective === 'section') {
+      if (!gridSelectedSection) return [];
+      return aggregated.filter(schedule => {
+        const sectionId = typeof schedule.section === 'object'
+          ? schedule.section?.id || schedule.section?.sectionName
+          : schedule.section;
+        return String(sectionId) === String(gridSelectedSection);
+      });
+    }
+
+    if (gridPerspective === 'teacher') {
+      if (!gridSelectedTeacher) return [];
+      return aggregated.filter(schedule => {
+        const teacherId = schedule.teacher?.id || schedule.teacher?.teacherId;
+        return String(teacherId) === String(gridSelectedTeacher);
+      });
+    }
+
+    if (gridPerspective === 'classroom') {
+      if (!gridSelectedClassroom) return [];
+      return aggregated.filter(schedule => {
+        const classroomId = schedule.classroom?.id;
+        return String(classroomId) === String(gridSelectedClassroom);
+      });
+    }
+
+    return aggregated;
+  }, [schedules, selectedSchoolYear, gridPerspective, gridSelectedSection, gridSelectedTeacher, gridSelectedClassroom]);
+
+  const getPerspectiveCellContent = (day, slot) => {
+    if (slot.type !== 'session') {
+      return {
+        primary: slot.label || (slot.type === 'lunch' ? 'LUNCH' : 'BREAK'),
+        emphasis: true,
+      };
+    }
+
+    const schedule = perspectiveSchedules.find(s =>
+      s.dayOfWeek === day &&
+      s.startTime === slot.start &&
+      s.endTime === slot.end
+    );
+
+    if (!schedule) {
+      return { primary: 'FREE TIME' };
+    }
+
+    const teacherName = schedule.teacher
+      ? `${schedule.teacher.firstName || ''} ${schedule.teacher.lastName || ''}`.trim()
+      : '';
+    const sectionName = typeof schedule.section === 'string'
+      ? schedule.section
+      : schedule.section?.sectionName || schedule.section?.name || '';
+    const classroomName = schedule.classroom?.roomName || '';
+
+    if (gridPerspective === 'section') {
+      return {
+        primary: schedule.subject || 'N/A',
+        secondary: [teacherName, classroomName].filter(Boolean).join(' • '),
+      };
+    }
+
+    if (gridPerspective === 'teacher') {
+      return {
+        primary: schedule.subject || 'N/A',
+        secondary: [sectionName, classroomName].filter(Boolean).join(' • '),
+      };
+    }
+
+    return {
+      primary: schedule.subject || 'N/A',
+      secondary: [sectionName, teacherName].filter(Boolean).join(' • '),
+    };
+  };
+
   if (loading) {
     return (
       <Box>
@@ -1109,6 +1256,14 @@ const ScheduleViewer = () => {
               color={viewMode === 'weekly' ? 'primary' : 'default'}
             >
               <CalendarViewWeekIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Template View">
+            <IconButton
+              onClick={() => setViewMode('template')}
+              color={viewMode === 'template' ? 'primary' : 'default'}
+            >
+              <ViewComfyIcon />
             </IconButton>
           </Tooltip>
           <Tooltip title="Refresh">
@@ -1500,7 +1655,7 @@ const ScheduleViewer = () => {
           </TableBody>
         </Table>
       </TableContainer>
-      ) : (
+      ) : viewMode === 'weekly' ? (
         /* Weekly View */
         <Box>
           {isAdmin() && (
@@ -1755,6 +1910,146 @@ const ScheduleViewer = () => {
               </TableContainer>
             );
           })()}
+        </Box>
+      ) : (
+        /* Template View */
+        <Box>
+          <Card sx={{ mb: 3 }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Weekly Template View
+              </Typography>
+              <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+                View schedules in the fixed daily template (Subject → Break → 2 Subjects → Lunch → 2 Subjects → Break → Subject).
+              </Typography>
+              <ButtonGroup sx={{ mb: 2 }}>
+                <Button
+                  variant={gridPerspective === 'section' ? 'contained' : 'outlined'}
+                  onClick={() => setGridPerspective('section')}
+                >
+                  By Section
+                </Button>
+                <Button
+                  variant={gridPerspective === 'teacher' ? 'contained' : 'outlined'}
+                  onClick={() => setGridPerspective('teacher')}
+                >
+                  By Teacher
+                </Button>
+                <Button
+                  variant={gridPerspective === 'classroom' ? 'contained' : 'outlined'}
+                  onClick={() => setGridPerspective('classroom')}
+                >
+                  By Room
+                </Button>
+              </ButtonGroup>
+              {gridPerspective === 'section' && (
+                <FormControl fullWidth sx={{ maxWidth: 320 }}>
+                  <InputLabel>Select Section</InputLabel>
+                  <Select
+                    value={gridSelectedSection}
+                    label="Select Section"
+                    onChange={(e) => setGridSelectedSection(e.target.value)}
+                  >
+                    {sections.map(section => (
+                      <MenuItem key={section.id} value={section.id}>
+                        {section.sectionName}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
+              {gridPerspective === 'teacher' && (
+                <FormControl fullWidth sx={{ maxWidth: 320 }}>
+                  <InputLabel>Select Teacher</InputLabel>
+                  <Select
+                    value={gridSelectedTeacher}
+                    label="Select Teacher"
+                    onChange={(e) => setGridSelectedTeacher(e.target.value)}
+                  >
+                    {teachers.map(teacher => (
+                      <MenuItem key={teacher.id} value={teacher.id}>
+                        {teacher.firstName} {teacher.lastName}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
+              {gridPerspective === 'classroom' && (
+                <FormControl fullWidth sx={{ maxWidth: 320 }}>
+                  <InputLabel>Select Room</InputLabel>
+                  <Select
+                    value={gridSelectedClassroom}
+                    label="Select Room"
+                    onChange={(e) => setGridSelectedClassroom(e.target.value)}
+                  >
+                    {classrooms.map(classroom => (
+                      <MenuItem key={classroom.id} value={classroom.id}>
+                        {classroom.roomName} ({classroom.roomType})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
+            </CardContent>
+          </Card>
+
+          <TableContainer component={Paper}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ minWidth: 110 }}>Time</TableCell>
+                  {TEMPLATE_DAYS.map(day => (
+                    <TableCell key={day} align="center" sx={{ minWidth: 160 }}>
+                      <Typography variant="subtitle2" fontWeight="bold">
+                        {TEMPLATE_DAY_LABELS[day]}
+                      </Typography>
+                    </TableCell>
+                  ))}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {TEMPLATE_VIEW_ROWS.map((row) => (
+                  <TableRow key={`${row.start}-${row.end}-${row.type}`}>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight="medium">
+                        {convertToTwelveHour(row.start)} - {convertToTwelveHour(row.end)}
+                      </Typography>
+                    </TableCell>
+                    {TEMPLATE_DAYS.map(day => {
+                      const cell = getPerspectiveCellContent(day, row);
+                      if (row.type !== 'session') {
+                        return (
+                          <TableCell
+                            key={`${day}-${row.start}`}
+                            align="center"
+                            sx={{
+                              bgcolor: row.type === 'lunch' ? 'warning.light' : 'grey.100',
+                              fontWeight: 'bold'
+                            }}
+                          >
+                            {cell.primary}
+                          </TableCell>
+                        );
+                      }
+
+                      return (
+                        <TableCell key={`${day}-${row.start}`} align="center">
+                          <Typography variant="body2" fontWeight="bold">
+                            {cell.primary}
+                          </Typography>
+                          {cell.secondary && (
+                            <Typography variant="caption" color="textSecondary">
+                              {cell.secondary}
+                            </Typography>
+                          )}
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
         </Box>
       )}
 

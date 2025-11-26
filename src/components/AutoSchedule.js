@@ -160,39 +160,16 @@ const AutoSchedule = () => {
     return false; // Doesn't span across any break
   };
 
-  const timeSlots = [
-    { start: '07:30', end: '08:30' },
-    { start: '07:30', end: '09:00' }, // 1.5 hour slot
-    { start: '08:00', end: '09:00' },
-    { start: '08:00', end: '09:30' }, // 1.5 hour slot
-    { start: '08:30', end: '09:30' }, // 1.5 hour slot
-    { start: '09:00', end: '10:00' },
-    { start: '09:00', end: '10:30' }, // 1.5 hour slot
-    { start: '09:30', end: '10:30' }, // 1.5 hour slot
-    { start: '10:00', end: '11:00' },
-    { start: '10:00', end: '11:30' }, // 1.5 hour slot
-    { start: '10:30', end: '11:30' }, // 1.5 hour slot
-    { start: '11:00', end: '12:00' },
-    { start: '11:00', end: '12:30' }, // 1.5 hour slot
-    { start: '11:30', end: '12:30' }, // 1.5 hour slot
-    { start: '13:00', end: '14:00' },
-    { start: '13:00', end: '14:30' }, // 1.5 hour slot
-    { start: '13:30', end: '14:30' }, // 1.5 hour slot
-    { start: '14:00', end: '15:00' },
-    { start: '14:00', end: '15:30' }, // 1.5 hour slot
-    { start: '14:30', end: '15:30' }, // 1.5 hour slot
-    { start: '15:00', end: '16:00' },
-    { start: '15:00', end: '16:15' }, // Before break
-    { start: '15:30', end: '16:15' }, // Before break
-    { start: '16:30', end: '17:30' }, // After break
-    { start: '16:30', end: '18:00' }, // 1.5 hour slot after break
-    { start: '17:00', end: '18:00' },
-    { start: '17:00', end: '18:30' }, // 1.5 hour slot
-    { start: '17:30', end: '18:30' }  // 1.5 hour slot
-  ].filter(slot => {
-    // Filter out slots that overlap with break OR span across breaks
-    return !overlapsWithBreak(slot.start, slot.end) && !spansAcrossBreak(slot.start, slot.end);
-  });
+  const SESSION_TEMPLATE_SLOTS = [
+    { name: 'Session 1', start: '07:30', end: '09:00' }, // Subject 1
+    { name: 'Session 2', start: '09:15', end: '10:45' }, // After morning break
+    { name: 'Session 3', start: '10:45', end: '12:15' }, // Before lunch
+    { name: 'Session 4', start: '13:15', end: '14:45' }, // After lunch
+    { name: 'Session 5', start: '14:45', end: '16:15' }, // Before afternoon break
+    { name: 'Session 6', start: '16:30', end: '18:00' }, // After afternoon break
+  ];
+
+  const timeSlots = SESSION_TEMPLATE_SLOTS;
 
   useEffect(() => {
     fetchData();
@@ -318,6 +295,14 @@ const AutoSchedule = () => {
         FRIDAY: { teachers: {}, classrooms: {}, sections: {} }
       };
       
+      const getSectionSubjectKey = (section, subject) => {
+        const sectionId = section?.id || section?.sectionName || section?.name || String(section);
+        const subjectId = subject?.id || subject?.name || subject?.code || String(subject);
+        return `${sectionId}-${subjectId}`;
+      };
+
+      const sectionSubjectClassroomMap = {};
+      
       // Helper function to add a scheduled period (defined before use)
       const addScheduledPeriod = (day, teacherId, classroomId, sectionId, start, end) => {
         if (!scheduledPeriods[day] || !teacherId || !classroomId || !sectionId) return;
@@ -411,7 +396,10 @@ const AutoSchedule = () => {
       
       // Create even distribution tracking
       const dayUsage = { MONDAY: 0, TUESDAY: 0, WEDNESDAY: 0, THURSDAY: 0, FRIDAY: 0 };
-      const timeUsage = { '07:30': 0, '08:00': 0, '09:00': 0, '10:00': 0, '11:00': 0, '13:00': 0, '14:00': 0, '15:00': 0, '16:30': 0, '17:00': 0 };
+      const timeUsage = SESSION_TEMPLATE_SLOTS.reduce((usage, slot) => {
+        usage[slot.start] = 0;
+        return usage;
+      }, {});
       const classroomUsage = {}; // Track classroom usage for load balancing
       const teacherUsage = {}; // Track teacher usage for load balancing
       
@@ -504,24 +492,39 @@ const AutoSchedule = () => {
       };
       
       
-      const findBestAvailableClassroom = (suitableClassrooms, day, timeSlot, teacher, usedSlots, section) => {
-        // Find classrooms that are available for this time slot and teacher
-        const availableClassrooms = suitableClassrooms.filter(classroom => {
-          // Check exact slot match
+      const findBestAvailableClassroom = (suitableClassrooms, day, timeSlot, teacher, usedSlots, section, preferredClassroomId = null) => {
+        const findAvailable = (classrooms) => classrooms.filter(classroom => {
           const slotKey = `${day}-${timeSlot.start}-${timeSlot.end}-${teacher.id}-${classroom.id}`;
           if (usedSlots.has(slotKey)) {
             return false;
           }
-          
-          // Check for time overlaps with existing schedules using the new tracking system
           const conflict = hasConflict(day, timeSlot.start, timeSlot.end, teacher, classroom, section);
           return !conflict.conflict;
         });
-        
+
+        let candidateClassrooms = suitableClassrooms;
+        if (preferredClassroomId) {
+          const preferred = suitableClassrooms.find(c => String(c.id) === String(preferredClassroomId));
+          if (preferred) {
+            candidateClassrooms = [preferred];
+          }
+        }
+
+        let availableClassrooms = findAvailable(candidateClassrooms);
+        if (availableClassrooms.length === 0 && candidateClassrooms.length !== suitableClassrooms.length) {
+          availableClassrooms = findAvailable(suitableClassrooms);
+        }
+
         if (availableClassrooms.length === 0) return null;
-        
-        // Among available classrooms, pick the least used one
-        return getLeastUsedClassroom(availableClassrooms);
+
+        const sorted = availableClassrooms
+          .map(classroom => ({
+            classroom,
+            count: classroomUsage[classroom.id] || 0
+          }))
+          .sort((a, b) => a.count - b.count);
+
+        return sorted[0]?.classroom;
       };
       
       // Helper function to find consecutive time slots for a subject
@@ -800,6 +803,9 @@ const AutoSchedule = () => {
               for (const day of sortedAvailableDays) {
                 if (assigned) break;
                 
+                const sectionSubjectKey = getSectionSubjectKey(request.section, request.subject);
+                const preferredClassroomId = sectionSubjectClassroomMap[sectionSubjectKey];
+
                 // Check if this time slot is available on this day
               const availableClassroom = findBestAvailableClassroom(
                 request.suitableClassrooms, 
@@ -807,10 +813,13 @@ const AutoSchedule = () => {
                 timeSlot, 
                 request.teacher, 
                   usedSlots,
-                  request.section
+                  request.section,
+                  preferredClassroomId
               );
               
               if (availableClassroom) {
+                  sectionSubjectClassroomMap[sectionSubjectKey] = availableClassroom.id;
+
                   // First check if the overall 1.5-hour time slot conflicts with existing schedules
                   const overallConflict = hasConflict(
                     day, 
