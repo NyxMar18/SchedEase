@@ -105,6 +105,132 @@ const getSubjectColor = (subject) => {
   return SUBJECT_COLORS[colorIndex];
 };
 
+const timeToMinutes = (timeStr) => {
+  if (!timeStr) return null;
+  const [hours, minutes] = timeStr.split(':').map(Number);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null;
+  return hours * 60 + minutes;
+};
+
+const calculateDurationInMinutes = (start, end) => {
+  const startMinutes = timeToMinutes(start);
+  const endMinutes = timeToMinutes(end);
+  if (startMinutes === null || endMinutes === null) return 0;
+  const diff = endMinutes - startMinutes;
+  return diff > 0 ? diff : 0;
+};
+
+const normalizeSectionIdentifier = (section) => {
+  if (!section) return '';
+  if (typeof section === 'string') return section;
+  return section.id || section.sectionName || section.name || '';
+};
+
+const normalizeTeacherIdentifier = (teacher) => {
+  if (!teacher) return '';
+  return teacher.id || teacher.teacherId || teacher.userId || teacher.email || '';
+};
+
+const normalizeClassroomIdentifier = (classroom) => {
+  if (!classroom) return '';
+  return classroom.id || classroom.roomName || '';
+};
+
+const createSessionKey = (schedule) => {
+  const parts = [
+    schedule.dayOfWeek || '',
+    normalizeSectionIdentifier(schedule.section),
+    normalizeTeacherIdentifier(schedule.teacher),
+    normalizeClassroomIdentifier(schedule.classroom),
+    schedule.subject || '',
+  ];
+
+  if (typeof schedule.sessionNumber !== 'undefined') {
+    parts.push(`session-${schedule.sessionNumber}`);
+  } else if (typeof schedule.durationIndex !== 'undefined') {
+    parts.push(`durationGroup`);
+  } else if (schedule.id) {
+    parts.push(`id-${schedule.id}`);
+  } else {
+    parts.push(`time-${schedule.startTime}`);
+  }
+
+  return parts.join('|');
+};
+
+const aggregateSchedulesBySession = (schedules) => {
+  const groups = new Map();
+
+  schedules.forEach(schedule => {
+    if (!schedule.dayOfWeek || !schedule.startTime || !schedule.endTime) return;
+    
+    const sessionKey = createSessionKey(schedule);
+    const startMinutes = timeToMinutes(schedule.startTime);
+    const endMinutes = timeToMinutes(schedule.endTime);
+    if (startMinutes === null || endMinutes === null) return;
+
+    const existing = groups.get(sessionKey);
+    if (existing) {
+      if (startMinutes < existing.startMinutes) {
+        existing.startMinutes = startMinutes;
+        existing.startTime = schedule.startTime;
+      }
+      if (endMinutes > existing.endMinutes) {
+        existing.endMinutes = endMinutes;
+        existing.endTime = schedule.endTime;
+      }
+    } else {
+      groups.set(sessionKey, {
+        ...schedule,
+        startMinutes,
+        endMinutes
+      });
+    }
+  });
+
+  return Array.from(groups.values()).map(({ startMinutes, endMinutes, ...rest }) => ({
+    ...rest
+  }));
+};
+
+const buildMergedSlotMap = (schedules, slots) => {
+  const slotIndexMap = {};
+  slots.forEach((slot, index) => {
+    slotIndexMap[slot.start] = index;
+  });
+
+  const merged = {};
+
+  schedules.forEach(schedule => {
+    const day = schedule.dayOfWeek;
+    if (!day) return;
+
+    const startIndex = slotIndexMap[schedule.startTime];
+    if (typeof startIndex === 'undefined') return;
+
+    const durationMinutes = calculateDurationInMinutes(schedule.startTime, schedule.endTime);
+    const span = Math.max(1, Math.ceil(durationMinutes / 15));
+
+    for (let offset = 0; offset < span; offset++) {
+      const slot = slots[startIndex + offset];
+      if (!slot) break;
+
+      const key = `${day}-${slot.start}`;
+      if (offset === 0) {
+        merged[key] = {
+          schedule,
+          rowSpan: span,
+          hidden: false
+        };
+      } else {
+        merged[key] = { hidden: true };
+      }
+    }
+  });
+
+  return merged;
+};
+
 const ScheduleViewer = () => {
   const { user, isAdmin, isTeacher } = useAuth();
   
@@ -899,9 +1025,33 @@ const ScheduleViewer = () => {
     }
   };
 
+  const convertToTwelveHour = (timeStr) => {
+    if (!timeStr) return '';
+    const [hourStr, minute] = timeStr.split(':');
+    let hour = parseInt(hourStr, 10);
+    if (isNaN(hour)) return timeStr;
+    const period = hour >= 12 ? 'PM' : 'AM';
+    hour = hour % 12;
+    if (hour === 0) hour = 12;
+    return `${hour}:${minute} ${period}`;
+  };
+
   const formatTime = (startTime, endTime) => {
     if (!startTime || !endTime) return 'N/A';
-    return `${startTime} - ${endTime}`;
+    return `${convertToTwelveHour(startTime)} - ${convertToTwelveHour(endTime)}`;
+  };
+
+  const formatDurationLabel = (startTime, endTime) => {
+    if (!startTime || !endTime) return '';
+    const start = new Date(`2000-01-01 ${startTime}`);
+    const end = new Date(`2000-01-01 ${endTime}`);
+    const minutes = (end - start) / (1000 * 60);
+    if (minutes <= 0) return '';
+    if (minutes >= 60) {
+      const hours = (minutes / 60).toFixed(1);
+      return ` (${parseFloat(hours)}h)`;
+    }
+    return ` (${minutes}min)`;
   };
 
   if (loading) {
@@ -1416,12 +1566,8 @@ const ScheduleViewer = () => {
               { start: '16:15', end: '16:30', label: 'Afternoon Break' },
             ];
             
-            // Helper function to check if a time slot is a break
-            const isBreakTime = (start, end) => {
-              return breakPeriods.some(breakPeriod => 
-                breakPeriod.start === start && breakPeriod.end === end
-              );
-            };
+            const aggregatedSchedules = aggregateSchedulesBySession(filteredSchedules);
+            const mergedSlotMap = buildMergedSlotMap(aggregatedSchedules, timeSlots);
 
             return (
               <TableContainer component={Paper}>
@@ -1454,7 +1600,7 @@ const ScheduleViewer = () => {
                             <TableRow>
                               <TableCell>
                                 <Typography variant="body2" fontWeight="bold" color="warning.main">
-                                  {breakBefore.start} - {breakBefore.end}
+                                  {convertToTwelveHour(breakBefore.start)} - {convertToTwelveHour(breakBefore.end)}
                                 </Typography>
                                 <Typography variant="caption" color="warning.main">
                                   {breakBefore.label}
@@ -1482,127 +1628,124 @@ const ScheduleViewer = () => {
                           <TableRow key={`${timeSlot.start}-${timeSlot.end}`}>
                             <TableCell>
                               <Typography variant="body2" fontWeight="medium">
-                                {timeSlot.start} - {timeSlot.end}
+                                {convertToTwelveHour(timeSlot.start)} - {convertToTwelveHour(timeSlot.end)}
                               </Typography>
                             </TableCell>
                             {daysOfWeek.map(day => {
-                          // Find schedule for this exact time slot (each slot is now an individual schedule)
-                          const scheduleForSlot = filteredSchedules.find(schedule => 
-                            schedule.dayOfWeek === day && 
-                            schedule.startTime === timeSlot.start &&
-                            schedule.endTime === timeSlot.end
-                          );
-                          
-                          // Calculate duration text
-                          let durationText = '';
-                          if (scheduleForSlot) {
-                            const startTime = new Date(`2000-01-01 ${scheduleForSlot.startTime}`);
-                            const endTime = new Date(`2000-01-01 ${scheduleForSlot.endTime}`);
-                            const durationMinutes = (endTime - startTime) / (1000 * 60);
-                            durationText = durationMinutes >= 60 ? 
-                              ` (${(durationMinutes / 60).toFixed(1)}h)` : 
-                              ` (${durationMinutes}min)`;
-                          }
-                             //happy
-                          const isDragOver = dragOverSlot && 
-                            dragOverSlot.day === day && 
-                            dragOverSlot.timeSlot.start === timeSlot.start;
-                          
-                          // Check if this slot's schedule is being dragged
-                          const isBeingDragged = draggedSchedule && 
-                            scheduleForSlot && 
-                            draggedSchedule.id === scheduleForSlot.id;
-                          
-                          return (
-                            <TableCell 
-                              key={`${day}-${timeSlot.start}`} 
-                              align="center"
-                              onDragOver={(e) => handleDragOver(e, day, timeSlot)}
-                              onDragLeave={handleDragLeave}
-                              onDrop={(e) => handleDrop(e, day, timeSlot)}
-                              sx={{
-                                border: isDragOver ? '2px dashed #1976d2' : '1px solid #e0e0e0',
-                                backgroundColor: isDragOver ? 'rgba(25, 118, 210, 0.1)' : 'transparent',
-                                transition: 'all 0.2s ease',
-                                position: 'relative'
-                              }}
-                            >
-                              {scheduleForSlot ? (
-                                <Card 
-                                  draggable={isAdmin()}
-                                  onDragStart={(e) => handleDragStart(e, scheduleForSlot)}
-                                  onDragEnd={handleDragEnd}
-                                  onDoubleClick={() => isAdmin() && handleEditSchedule(scheduleForSlot)}
-                                  sx={{ 
-                                    p: 1, 
-                                    bgcolor: isBeingDragged ? 'primary.main' : getSubjectColor(scheduleForSlot.subject).bg, 
-                                    color: isBeingDragged ? 'primary.contrastText' : getSubjectColor(scheduleForSlot.subject).text,
-                                    minHeight: 80,
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    justifyContent: 'center',
-                                    cursor: isAdmin() ? 'grab' : 'default',
-                                    opacity: isBeingDragged ? 0.5 : 1,
-                                    transform: isBeingDragged ? 'scale(0.95)' : 'scale(1)',
+                              const cellKey = `${day}-${timeSlot.start}`;
+                              const slotInfo = mergedSlotMap[cellKey];
+
+                              if (slotInfo?.hidden) {
+                                return null;
+                              }
+
+                              const scheduleForSlot = slotInfo?.schedule;
+                              const rowSpan = slotInfo?.rowSpan || 1;
+                              const durationText = scheduleForSlot ? formatDurationLabel(scheduleForSlot.startTime, scheduleForSlot.endTime) : '';
+                              const displayTime = scheduleForSlot ? formatTime(scheduleForSlot.startTime, scheduleForSlot.endTime) : '';
+
+                              const isDragOver = dragOverSlot && 
+                                dragOverSlot.day === day && 
+                                dragOverSlot.timeSlot.start === timeSlot.start;
+                              
+                              const isBeingDragged = draggedSchedule && 
+                                scheduleForSlot && 
+                                draggedSchedule.id === scheduleForSlot.id;
+                              
+                              return (
+                                <TableCell 
+                                  key={`${day}-${timeSlot.start}`} 
+                                  align="center"
+                                  rowSpan={rowSpan}
+                                  onDragOver={(e) => handleDragOver(e, day, timeSlot)}
+                                  onDragLeave={handleDragLeave}
+                                  onDrop={(e) => handleDrop(e, day, timeSlot)}
+                                  sx={{
+                                    border: isDragOver ? '2px dashed #1976d2' : '1px solid #e0e0e0',
+                                    backgroundColor: isDragOver ? 'rgba(25, 118, 210, 0.1)' : 'transparent',
                                     transition: 'all 0.2s ease',
-                                    '&:hover': {
-                                      transform: isAdmin() ? 'scale(1.02)' : 'scale(1)',
-                                      boxShadow: isAdmin() ? 3 : 1
-                                    },
-                                    '&:active': {
-                                      cursor: isAdmin() ? 'grabbing' : 'default'
-                                    }
+                                    position: 'relative',
+                                    minHeight: 80 * rowSpan
                                   }}
                                 >
-                                  <Typography variant="caption" fontWeight="bold">
-                                    {scheduleForSlot.subject || 'N/A'}
-                                    {durationText}
-                                  </Typography>
-                                  <Typography variant="caption" display="block">
-                                    {scheduleForSlot.teacher ? 
-                                      `${scheduleForSlot.teacher.firstName || ''} ${scheduleForSlot.teacher.lastName || ''}`.trim() : 
-                                      'N/A'
-                                    }
-                                  </Typography>
-                                  <Typography variant="caption" display="block">
-                                    {scheduleForSlot.classroom?.roomName || 'N/A'}
-                                  </Typography>
-                                  <Typography variant="caption" display="block">
-                                    {typeof scheduleForSlot.section === 'string' 
-                                      ? scheduleForSlot.section 
-                                      : scheduleForSlot.section?.sectionName || scheduleForSlot.section?.name || 'N/A'
-                                    }
-                                  </Typography>
-                                  {isAdmin() && (
-                                    <Typography variant="caption" display="block" sx={{ mt: 0.5, fontStyle: 'italic' }}>
-                                    </Typography>
+                                  {scheduleForSlot ? (
+                                    <Card 
+                                      draggable={isAdmin()}
+                                      onDragStart={(e) => handleDragStart(e, scheduleForSlot)}
+                                      onDragEnd={handleDragEnd}
+                                      onDoubleClick={() => isAdmin() && handleEditSchedule(scheduleForSlot)}
+                                      sx={{ 
+                                        p: 1, 
+                                        bgcolor: isBeingDragged ? 'primary.main' : getSubjectColor(scheduleForSlot.subject).bg, 
+                                        color: isBeingDragged ? 'primary.contrastText' : getSubjectColor(scheduleForSlot.subject).text,
+                                        minHeight: 80 * rowSpan,
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        justifyContent: 'center',
+                                        cursor: isAdmin() ? 'grab' : 'default',
+                                        opacity: isBeingDragged ? 0.5 : 1,
+                                        transform: isBeingDragged ? 'scale(0.95)' : 'scale(1)',
+                                        transition: 'all 0.2s ease',
+                                        '&:hover': {
+                                          transform: isAdmin() ? 'scale(1.02)' : 'scale(1)',
+                                          boxShadow: isAdmin() ? 3 : 1
+                                        },
+                                        '&:active': {
+                                          cursor: isAdmin() ? 'grabbing' : 'default'
+                                        }
+                                      }}
+                                    >
+                                      <Typography variant="caption" fontWeight="bold">
+                                        {scheduleForSlot.subject || 'N/A'}
+                                      </Typography>
+                                      <Typography variant="caption" display="block" fontWeight="medium">
+                                        {displayTime}{durationText}
+                                      </Typography>
+                                      <Typography variant="caption" display="block">
+                                        {scheduleForSlot.teacher ? 
+                                          `${scheduleForSlot.teacher.firstName || ''} ${scheduleForSlot.teacher.lastName || ''}`.trim() : 
+                                          'N/A'
+                                        }
+                                      </Typography>
+                                      <Typography variant="caption" display="block">
+                                        {scheduleForSlot.classroom?.roomName || 'N/A'}
+                                      </Typography>
+                                      <Typography variant="caption" display="block">
+                                        {typeof scheduleForSlot.section === 'string' 
+                                          ? scheduleForSlot.section 
+                                          : scheduleForSlot.section?.sectionName || scheduleForSlot.section?.name || 'N/A'
+                                        }
+                                      </Typography>
+                                      {isAdmin() && (
+                                        <Typography variant="caption" display="block" sx={{ mt: 0.5, fontStyle: 'italic' }}>
+                                        </Typography>
+                                      )}
+                                    </Card>
+                                  ) : (
+                                    <Box 
+                                      sx={{ 
+                                        minHeight: 80 * rowSpan, 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        justifyContent: 'center',
+                                        border: isDragOver ? '2px dashed #4caf50' : '2px dashed transparent',
+                                        borderRadius: 1,
+                                        backgroundColor: isDragOver ? 'rgba(76, 175, 80, 0.1)' : 'transparent',
+                                        transition: 'all 0.2s ease'
+                                      }}
+                                    >
+                                      <Typography 
+                                        variant="caption" 
+                                        color={isDragOver ? 'primary' : 'textSecondary'}
+                                        sx={{ fontWeight: isDragOver ? 'bold' : 'normal' }}
+                                      >
+                                        {isDragOver ? 'Drop here' : 'Free'}
+                                      </Typography>
+                                    </Box>
                                   )}
-                                </Card>
-                              ) : (
-                                <Box 
-                                  sx={{ 
-                                    minHeight: 80, 
-                                    display: 'flex', 
-                                    alignItems: 'center', 
-                                    justifyContent: 'center',
-                                    border: isDragOver ? '2px dashed #4caf50' : '2px dashed transparent',
-                                    borderRadius: 1,
-                                    backgroundColor: isDragOver ? 'rgba(76, 175, 80, 0.1)' : 'transparent',
-                                    transition: 'all 0.2s ease'
-                                  }}
-                                >
-                                  <Typography 
-                                    variant="caption" 
-                                    color={isDragOver ? 'primary' : 'textSecondary'}
-                                    sx={{ fontWeight: isDragOver ? 'bold' : 'normal' }}
-                                  >
-                                    {isDragOver ? 'Drop here' : 'Free'}
-                                  </Typography>
-                                </Box>
-                              )}
-                            </TableCell>
-                          );
-                        })}
+                                </TableCell>
+                              );
+                            })}
                       </TableRow>
                       </React.Fragment>
                     );

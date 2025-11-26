@@ -45,7 +45,6 @@ const ClassroomManagement = () => {
     roomCode: '',
     roomType: '',
     capacity: '',
-    location: '',
     description: '',
   });
 
@@ -76,7 +75,6 @@ const ClassroomManagement = () => {
         roomCode: classroom.roomCode || '',
         roomType: classroom.roomType,
         capacity: classroom.capacity.toString(),
-        location: classroom.location || '',
         description: classroom.description || '',
       });
     } else {
@@ -86,7 +84,6 @@ const ClassroomManagement = () => {
         roomCode: '',
         roomType: '',
         capacity: '',
-        location: '',
         description: '',
       });
     }
@@ -101,7 +98,6 @@ const ClassroomManagement = () => {
       roomCode: '',
       roomType: '',
       capacity: '',
-      location: '',
       description: '',
     });
   };
@@ -125,10 +121,7 @@ const ClassroomManagement = () => {
         setError('Capacity must be a positive number');
         return;
       }
-      if (!formData.location.trim()) {
-        setError('Location is required');
-        return;
-      }
+  
 
       const classroomData = {
         ...formData,
@@ -196,7 +189,6 @@ const ClassroomManagement = () => {
                 <TableCell>Room Code</TableCell>
                 <TableCell>Type</TableCell>
                 <TableCell>Capacity</TableCell>
-                <TableCell>Location</TableCell>
                 <TableCell>Description</TableCell>
                 <TableCell>Actions</TableCell>
               </TableRow>
@@ -210,7 +202,6 @@ const ClassroomManagement = () => {
                     <Chip label={classroom.roomType} color="primary" size="small" />
                   </TableCell>
                   <TableCell>{classroom.capacity}</TableCell>
-                  <TableCell>{classroom.location || '-'}</TableCell>
                   <TableCell>{classroom.description || '-'}</TableCell>
                   <TableCell>
                     <IconButton onClick={() => handleOpen(classroom)}>
@@ -277,15 +268,6 @@ const ClassroomManagement = () => {
                 fullWidth
                 required
                 inputProps={{ min: 1 }}
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                label="Location"
-                value={formData.location}
-                onChange={handleChange('location')}
-                fullWidth
-                required
               />
             </Grid>
             <Grid item xs={12}>

@@ -54,13 +54,10 @@ const SubjectManagement = () => {
   });
 
   const categories = [
-    'Mathematics',
-    'Science',
-    'Social Science',
-    'Physical Education',
-    'English',
-    'ABM',
-    'Filipino'
+    'Core',
+    'Applied',
+    'Specialized'
+   
 
   
 
@@ -223,13 +220,12 @@ const SubjectManagement = () => {
 
   const getCategoryChip = (category) => {
     const categoryColors = {
-      'Mathematics': 'primary',
-      'Science': 'success',
-      'Social Science': 'info',
-      'Physical Education': 'secondary',
-      'English': 'error',
-      'ABM': 'default',
-      'Filipino': 'primary'
+      'Core': 'primary',
+      'Applied': 'success',
+      'SSpecialized': 'info'
+
+
+      
     };
     
     return (
@@ -287,7 +283,7 @@ const SubjectManagement = () => {
           <Card>
             <CardContent>
               <Typography variant="h4" color="info.main">
-                {subjects.filter(s => s.category === 'Mathematics').length}
+                {subjects.filter(s => s.category === 'Mathematics').length} 
               </Typography>
               <Typography variant="body2" color="textSecondary">
                 Math Subjects

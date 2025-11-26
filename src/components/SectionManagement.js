@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -47,7 +47,6 @@ const SectionManagement = () => {
   const [editingSection, setEditingSection] = useState(null);
   const [formData, setFormData] = useState({
     sectionName: '',
-    sectionCode: '',
     track: '',
     gradeLevel: '',
     maxStudents: '',
@@ -57,6 +56,24 @@ const SectionManagement = () => {
 
   const tracks = ['STEM', 'ABM', 'HUMSS', 'GAS', 'TVL'];
   const gradeLevels = ['Grade 11', 'Grade 12'];
+
+  const groupedSubjects = useMemo(() => {
+    const groups = subjects.reduce((acc, subject) => {
+      const category = subject.category || 'Uncategorized';
+      if (!acc[category]) {
+        acc[category] = [];
+      }
+      acc[category].push(subject);
+      return acc;
+    }, {});
+
+    return Object.entries(groups)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([category, items]) => [
+        category,
+        items.sort((a, b) => (a.name || '').localeCompare(b.name || '')),
+      ]);
+  }, [subjects]);
 
   useEffect(() => {
     fetchSections();
@@ -84,7 +101,7 @@ const SectionManagement = () => {
       setEditingSection(section);
       setFormData({
         sectionName: section.sectionName,
-        sectionCode: section.sectionCode,
+
         track: section.track,
         gradeLevel: section.gradeLevel,
         maxStudents: section.maxStudents.toString(),
@@ -95,7 +112,6 @@ const SectionManagement = () => {
       setEditingSection(null);
       setFormData({
         sectionName: '',
-        sectionCode: '',
         track: '',
         gradeLevel: '',
         maxStudents: '',
@@ -111,7 +127,6 @@ const SectionManagement = () => {
     setEditingSection(null);
     setFormData({
       sectionName: '',
-      sectionCode: '',
       track: '',
       gradeLevel: '',
       maxStudents: '',
@@ -194,7 +209,6 @@ const SectionManagement = () => {
             <TableHead>
                 <TableRow>
                   <TableCell>Section Name</TableCell>
-                  <TableCell>Section Code</TableCell>
                   <TableCell>Track</TableCell>
                   <TableCell>Grade Level</TableCell>
                   <TableCell>Subjects</TableCell>
@@ -206,7 +220,6 @@ const SectionManagement = () => {
               {sections.map((section) => (
                 <TableRow key={section.id}>
                   <TableCell>{section.sectionName}</TableCell>
-                  <TableCell>{section.sectionCode}</TableCell>
                   <TableCell>
                     <Chip label={section.track} color="primary" size="small" />
                   </TableCell>
@@ -237,7 +250,7 @@ const SectionManagement = () => {
         </TableContainer>
       )}
 
-      <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
+      <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
         <DialogTitle>
           {editingSection ? 'Edit Section' : 'Add New Section'}
         </DialogTitle>
@@ -253,16 +266,7 @@ const SectionManagement = () => {
                 placeholder="e.g., STEM 1, ABM 2"
               />
             </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                label="Section Code"
-                value={formData.sectionCode}
-                onChange={handleChange('sectionCode')}
-                fullWidth
-                required
-                placeholder="e.g., STEM1, ABM2"
-              />
-            </Grid>
+      
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth required>
                 <InputLabel>Track</InputLabel>
@@ -310,20 +314,33 @@ const SectionManagement = () => {
               <Typography variant="subtitle1" gutterBottom>
                 Select Subjects for this Section:
               </Typography>
-              <FormGroup row>
-                {subjects.map((subject) => (
-                  <FormControlLabel
-                    key={subject.id}
-                    control={
-                      <Checkbox
-                        checked={formData.selectedSubjects.includes(subject.id)}
-                        onChange={() => handleSubjectToggle(subject.id)}
-                      />
-                    }
-                    label={`${subject.name} (${subject.code})`}
-                  />
-                ))}
-              </FormGroup>
+              {subjects.length === 0 ? (
+                <Alert severity="info">
+                  No subjects available. Please add subjects first.
+                </Alert>
+              ) : (
+                groupedSubjects.map(([category, categorySubjects]) => (
+                  <Box key={category} sx={{ mb: 2 }}>
+                    <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+                      {category}
+                    </Typography>
+                    <FormGroup row sx={{ pl: 1 }}>
+                      {categorySubjects.map((subject) => (
+                        <FormControlLabel
+                          key={subject.id}
+                          control={
+                            <Checkbox
+                              checked={formData.selectedSubjects.includes(subject.id)}
+                              onChange={() => handleSubjectToggle(subject.id)}
+                            />
+                          }
+                          label={subject.name || 'Untitled Subject'}
+                        />
+                      ))}
+                    </FormGroup>
+                  </Box>
+                ))
+              )}
             </Grid>
             <Grid item xs={12}>
               <TextField
