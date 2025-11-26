@@ -92,12 +92,6 @@ const AutoSchedule = () => {
     { value: 'TTH', label: 'TTH (Tue/Thu)', days: ['TUESDAY', 'THURSDAY'] }
   ];
 
-  // Helper function to get optimal schedule pattern based on duration
-  const getOptimalSchedulePattern = (duration) => {
-    if (duration <= 2) return 'TTH';    // 1-2 hours: Tue, Thu
-    if (duration <= 3) return 'MWF';    // 3 hours: Mon, Wed, Fri
-    return 'DAILY';                     // 4+ hours: Mon-Fri
-  };
 
   // Helper function to get teacher users (users with teacher role)
   const getTeacherUsers = () => {
@@ -113,9 +107,65 @@ const AutoSchedule = () => {
     // If teacher data is directly in the user object
     return user;
   };
+  // All break periods: Morning Break, Lunch, and Afternoon Break
+  const breakPeriods = [
+    { start: '09:00', end: '09:15', label: 'Morning Break' },
+    { start: '12:15', end: '13:15', label: 'Lunch Break' },
+    { start: '16:15', end: '16:30', label: 'Afternoon Break' }
+  ];
+  
+  // Helper function to check if a time slot overlaps with any break
+  const overlapsWithBreak = (slotStart, slotEnd) => {
+    const slotStartTime = slotStart.split(':').map(Number);
+    const slotEndTime = slotEnd.split(':').map(Number);
+    const slotStartMinutes = slotStartTime[0] * 60 + slotStartTime[1];
+    const slotEndMinutes = slotEndTime[0] * 60 + slotEndTime[1];
+    
+    // Check if slot overlaps with any break period
+    for (const breakPeriod of breakPeriods) {
+      const breakStartTime = breakPeriod.start.split(':').map(Number);
+      const breakEndTime = breakPeriod.end.split(':').map(Number);
+      const breakStartMinutes = breakStartTime[0] * 60 + breakStartTime[1];
+      const breakEndMinutes = breakEndTime[0] * 60 + breakEndTime[1];
+      
+      // Check if slot overlaps with this break period
+      if (!(slotEndMinutes <= breakStartMinutes || slotStartMinutes >= breakEndMinutes)) {
+        return true; // Overlaps with this break
+      }
+    }
+    
+    return false; // No overlap with any break
+  };
+  
+  // Helper function to check if a time slot spans across any break (for 1.5-hour slots)
+  const spansAcrossBreak = (slotStart, slotEnd) => {
+    const slotStartTime = slotStart.split(':').map(Number);
+    const slotEndTime = slotEnd.split(':').map(Number);
+    const slotStartMinutes = slotStartTime[0] * 60 + slotStartTime[1];
+    const slotEndMinutes = slotEndTime[0] * 60 + slotEndTime[1];
+    
+    // Check if slot spans across any break period (start before break, end after break)
+    for (const breakPeriod of breakPeriods) {
+      const breakStartTime = breakPeriod.start.split(':').map(Number);
+      const breakEndTime = breakPeriod.end.split(':').map(Number);
+      const breakStartMinutes = breakStartTime[0] * 60 + breakStartTime[1];
+      const breakEndMinutes = breakEndTime[0] * 60 + breakEndTime[1];
+      
+      // Check if slot starts before break and ends after break (spans across it)
+      if (slotStartMinutes < breakStartMinutes && slotEndMinutes > breakEndMinutes) {
+        return true; // Spans across this break
+      }
+    }
+    
+    return false; // Doesn't span across any break
+  };
+
   const timeSlots = [
+    { start: '07:30', end: '08:30' },
+    { start: '07:30', end: '09:00' }, // 1.5 hour slot
     { start: '08:00', end: '09:00' },
     { start: '08:00', end: '09:30' }, // 1.5 hour slot
+    { start: '08:30', end: '09:30' }, // 1.5 hour slot
     { start: '09:00', end: '10:00' },
     { start: '09:00', end: '10:30' }, // 1.5 hour slot
     { start: '09:30', end: '10:30' }, // 1.5 hour slot
@@ -132,9 +182,17 @@ const AutoSchedule = () => {
     { start: '14:00', end: '15:30' }, // 1.5 hour slot
     { start: '14:30', end: '15:30' }, // 1.5 hour slot
     { start: '15:00', end: '16:00' },
-    { start: '15:00', end: '16:30' }, // 1.5 hour slot
-    { start: '15:30', end: '16:30' }  // 1.5 hour slot
-  ];
+    { start: '15:00', end: '16:15' }, // Before break
+    { start: '15:30', end: '16:15' }, // Before break
+    { start: '16:30', end: '17:30' }, // After break
+    { start: '16:30', end: '18:00' }, // 1.5 hour slot after break
+    { start: '17:00', end: '18:00' },
+    { start: '17:00', end: '18:30' }, // 1.5 hour slot
+    { start: '17:30', end: '18:30' }  // 1.5 hour slot
+  ].filter(slot => {
+    // Filter out slots that overlap with break OR span across breaks
+    return !overlapsWithBreak(slot.start, slot.end) && !spansAcrossBreak(slot.start, slot.end);
+  });
 
   useEffect(() => {
     fetchData();
@@ -225,15 +283,169 @@ const AutoSchedule = () => {
         requiredRoomTypes: s.requiredRoomTypes || (s.requiredRoomType ? [s.requiredRoomType] : []) 
       })));
 
+      // Load existing schedules first to prevent conflicts
+      // Only load schedules for the selected school year to avoid conflicts with other school years
+      let existingSchedules = [];
+      try {
+        const existingRes = await scheduleAPI.getAll();
+        const allSchedules = existingRes.data || [];
+        // Filter to only include schedules from the selected school year
+        existingSchedules = allSchedules.filter(schedule => schedule.schoolYearId === selectedSchoolYear);
+        console.log(`📋 Loaded ${existingSchedules.length} existing schedules for conflict checking (school year: ${selectedSchoolYear})`);
+        console.log(`📊 Total schedules in database: ${allSchedules.length}, filtered to ${existingSchedules.length} for selected school year`);
+      } catch (error) {
+        console.log('⚠️ Could not load existing schedules:', error);
+      }
+
       const schedules = [];
       const failedSchedulesList = []; // Track failed schedules with reasons and resolutions
       const usedSlots = new Set(); // Track used time slots to prevent conflicts
       
+      // Track all scheduled time periods for efficient conflict checking
+      // Format: { day: { teacherId: [{start, end}], classroomId: [{start, end}], sectionId: [{start, end}] } }
+      const scheduledPeriods = {
+        MONDAY: { teachers: {}, classrooms: {}, sections: {} },
+        TUESDAY: { teachers: {}, classrooms: {}, sections: {} },
+        WEDNESDAY: { teachers: {}, classrooms: {}, sections: {} },
+        THURSDAY: { teachers: {}, classrooms: {}, sections: {} },
+        FRIDAY: { teachers: {}, classrooms: {}, sections: {} }
+      };
+      
+      // Helper function to add a scheduled period (defined before use)
+      const addScheduledPeriod = (day, teacherId, classroomId, sectionId, start, end) => {
+        if (!scheduledPeriods[day] || !teacherId || !classroomId || !sectionId) return;
+        
+        const tId = String(teacherId);
+        const cId = String(classroomId);
+        const sId = String(sectionId);
+        
+        if (!scheduledPeriods[day].teachers[tId]) {
+          scheduledPeriods[day].teachers[tId] = [];
+        }
+        scheduledPeriods[day].teachers[tId].push({ start, end });
+        
+        if (!scheduledPeriods[day].classrooms[cId]) {
+          scheduledPeriods[day].classrooms[cId] = [];
+        }
+        scheduledPeriods[day].classrooms[cId].push({ start, end });
+        
+        if (!scheduledPeriods[day].sections[sId]) {
+          scheduledPeriods[day].sections[sId] = [];
+        }
+        scheduledPeriods[day].sections[sId].push({ start, end });
+      };
+      
+      // Populate scheduledPeriods with existing schedules
+      existingSchedules.forEach(schedule => {
+        if (schedule.dayOfWeek && schedule.startTime && schedule.endTime) {
+          const teacherId = schedule.teacher?.id || schedule.teacher?.teacherId || schedule.teacherUser?.id;
+          const classroomId = schedule.classroom?.id;
+          let sectionId = null;
+          if (schedule.section) {
+            if (typeof schedule.section === 'object') {
+              sectionId = schedule.section.id || schedule.section.sectionName || String(schedule.section);
+            } else {
+              sectionId = String(schedule.section);
+            }
+          }
+          
+          if (teacherId && classroomId && sectionId) {
+            addScheduledPeriod(
+              schedule.dayOfWeek,
+              String(teacherId),
+              String(classroomId),
+              String(sectionId),
+              schedule.startTime,
+              schedule.endTime
+            );
+          }
+        }
+      });
+      
+      console.log(`✅ Populated scheduledPeriods with ${existingSchedules.length} existing schedules`);
+      
+      // Helper function to check if a period conflicts with scheduled periods
+      const checkPeriodConflict = (day, teacherId, classroomId, sectionId, start, end) => {
+        if (!scheduledPeriods[day] || !teacherId || !classroomId || !sectionId) return { conflict: false };
+        
+        const tId = String(teacherId);
+        const cId = String(classroomId);
+        const sId = String(sectionId);
+        
+        // Check teacher conflicts
+        if (scheduledPeriods[day].teachers[tId]) {
+          for (const period of scheduledPeriods[day].teachers[tId]) {
+            if (timePeriodsOverlap(start, end, period.start, period.end)) {
+              return { conflict: true, reason: 'teacher', details: `Teacher has overlapping schedule at ${period.start}-${period.end}` };
+            }
+          }
+        }
+        
+        // Check classroom conflicts
+        if (scheduledPeriods[day].classrooms[cId]) {
+          for (const period of scheduledPeriods[day].classrooms[cId]) {
+            if (timePeriodsOverlap(start, end, period.start, period.end)) {
+              return { conflict: true, reason: 'classroom', details: `Classroom has overlapping schedule at ${period.start}-${period.end}` };
+            }
+          }
+        }
+        
+        // Check section conflicts
+        if (scheduledPeriods[day].sections[sId]) {
+          for (const period of scheduledPeriods[day].sections[sId]) {
+            if (timePeriodsOverlap(start, end, period.start, period.end)) {
+              return { conflict: true, reason: 'section', details: `Section has overlapping schedule at ${period.start}-${period.end}` };
+            }
+          }
+        }
+        
+        return { conflict: false };
+      };
+      
       // Create even distribution tracking
       const dayUsage = { MONDAY: 0, TUESDAY: 0, WEDNESDAY: 0, THURSDAY: 0, FRIDAY: 0 };
-      const timeUsage = { '08:00': 0, '09:00': 0, '10:00': 0, '11:00': 0, '13:00': 0, '14:00': 0, '15:00': 0 };
+      const timeUsage = { '07:30': 0, '08:00': 0, '09:00': 0, '10:00': 0, '11:00': 0, '13:00': 0, '14:00': 0, '15:00': 0, '16:30': 0, '17:00': 0 };
       const classroomUsage = {}; // Track classroom usage for load balancing
       const teacherUsage = {}; // Track teacher usage for load balancing
+      
+      // Helper function to convert time string to minutes
+      const timeToMinutes = (timeStr) => {
+        const [hours, minutes] = timeStr.split(':').map(Number);
+        return hours * 60 + minutes;
+      };
+      
+      // Helper function to check if two time periods overlap
+      const timePeriodsOverlap = (start1, end1, start2, end2) => {
+        const start1Min = timeToMinutes(start1);
+        const end1Min = timeToMinutes(end1);
+        const start2Min = timeToMinutes(start2);
+        const end2Min = timeToMinutes(end2);
+        // Two periods overlap if one starts before the other ends
+        return !(end1Min <= start2Min || end2Min <= start1Min);
+      };
+      
+      // Helper function to check if a time slot conflicts with existing schedules
+      const hasConflict = (day, slotStart, slotEnd, teacher, classroom, section) => {
+        const teacherId = teacher?.id || teacher?.teacherId || (teacher?.teacherUser?.id);
+        const classroomId = classroom?.id;
+        // Handle section ID - can be object with id/sectionName, or string
+        let sectionId = null;
+        if (section) {
+          if (typeof section === 'object') {
+            sectionId = section.id || section.sectionName || String(section);
+          } else {
+            sectionId = String(section);
+          }
+        }
+        
+        if (!teacherId || !classroomId || !sectionId) {
+          // If we can't get IDs, be conservative and check anyway
+          console.warn(`⚠️ Missing IDs for conflict check: teacherId=${teacherId}, classroomId=${classroomId}, sectionId=${sectionId}`);
+          return { conflict: false };
+        }
+        
+        return checkPeriodConflict(day, String(teacherId), String(classroomId), String(sectionId), slotStart, slotEnd);
+      };
       
       // Initialize classroom usage tracking
       classrooms.forEach(classroom => {
@@ -285,11 +497,18 @@ const AutoSchedule = () => {
       };
       
       
-      const findBestAvailableClassroom = (suitableClassrooms, day, timeSlot, teacher, usedSlots) => {
+      const findBestAvailableClassroom = (suitableClassrooms, day, timeSlot, teacher, usedSlots, section) => {
         // Find classrooms that are available for this time slot and teacher
         const availableClassrooms = suitableClassrooms.filter(classroom => {
+          // Check exact slot match
           const slotKey = `${day}-${timeSlot.start}-${timeSlot.end}-${teacher.id}-${classroom.id}`;
-          return !usedSlots.has(slotKey);
+          if (usedSlots.has(slotKey)) {
+            return false;
+          }
+          
+          // Check for time overlaps with existing schedules using the new tracking system
+          const conflict = hasConflict(day, timeSlot.start, timeSlot.end, teacher, classroom, section);
+          return !conflict.conflict;
         });
         
         if (availableClassrooms.length === 0) return null;
@@ -303,7 +522,8 @@ const AutoSchedule = () => {
         const availableTimeSlots = timeSlots.filter(slot => {
           const teacherStartTime = teacher.availableStartTime;
           const teacherEndTime = teacher.availableEndTime;
-          return teacherStartTime <= slot.start && teacherEndTime >= slot.end;
+          // Exclude slots that overlap with break period
+          return teacherStartTime <= slot.start && teacherEndTime >= slot.end && !overlapsWithBreak(slot.start, slot.end);
         });
         
         // Try to find consecutive slots starting from the given index
@@ -404,10 +624,14 @@ const AutoSchedule = () => {
           
           // Process each room type configuration separately
           for (const roomTypeConfig of roomTypeConfigs) {
-            const roomTypeDuration = parseFloat(roomTypeConfig.duration) || 1;
             const requiredRoomType = roomTypeConfig.type;
             
-            console.log(`🏫 Looking for classroom for subject: ${subject.name} (room type: ${requiredRoomType}, duration: ${roomTypeDuration}h)`);
+            // Fixed: All subjects are 3 hours, divided into 2 sessions of 1.5 hours each
+            const fixedTotalDuration = 3; // Fixed 3 hours per subject
+            const sessionDuration = 1.5; // Each session is 1.5 hours (6 × 15-minute slots)
+            const numberOfSessions = 2; // 2 sessions per week
+            
+            console.log(`🏫 Looking for classroom for subject: ${subject.name} (room type: ${requiredRoomType}, fixed duration: ${fixedTotalDuration}h = ${numberOfSessions} sessions × ${sessionDuration}h)`);
             
             const suitableClassrooms = classrooms.filter(classroom => {
               const classroomType = (classroom.roomType || '').toLowerCase().trim();
@@ -436,14 +660,18 @@ const AutoSchedule = () => {
               continue;
             }
 
-            // Determine optimal schedule pattern based on room type duration
-            const optimalPattern = getOptimalSchedulePattern(roomTypeDuration);
-            const availableDays = getAvailableDaysForPattern(optimalPattern);
-            
-            console.log(`✅ Creating ${roomTypeDuration} hours for ${section.sectionName} - ${subject.name} in ${requiredRoomType} (distributed across week)`);
-            console.log(`📅 Room type ${requiredRoomType}: ${roomTypeDuration} hours → Optimal pattern: ${optimalPattern} -> Days: ${availableDays.join(', ')}`);
-            
+            // Get all available days for scheduling the 2 sessions
+            const allAvailableDays = getAvailableDaysForPattern('DAILY');
             const selectedClassroom = getLeastUsedClassroom(suitableClassrooms);
+            
+            // Create 2 separate scheduling requests, one for each session
+            // Each session will be scheduled on a different day
+            for (let sessionIndex = 0; sessionIndex < numberOfSessions; sessionIndex++) {
+              // Each session gets scheduled on a single day (will be assigned during scheduling)
+              // We'll use all available days and let the scheduler pick the best day for each session
+              const availableDays = allAvailableDays; // Will be reduced to 1 day per session during scheduling
+              
+              console.log(`✅ Creating session ${sessionIndex + 1}/${numberOfSessions} (${sessionDuration}h) for ${section.sectionName} - ${subject.name} in ${requiredRoomType}`);
             
             schedulingRequests.push({
               section,
@@ -451,13 +679,16 @@ const AutoSchedule = () => {
               teacher: teacherData || selectedUser,
               teacherUser: selectedUser,
               classroom: selectedClassroom,
-              durationIndex: 0,
-              totalDuration: roomTypeDuration,
+                durationIndex: sessionIndex,
+                totalDuration: sessionDuration, // Each session is 1.5 hours
+                sessionNumber: sessionIndex + 1, // Track which session this is (1 or 2)
+                totalSessions: numberOfSessions,
               availableDays: availableDays,
               uniformSchedule: true,
               suitableClassrooms,
               requiredRoomType: requiredRoomType // Store which room type this request is for
             });
+            }
           }
         }
       }
@@ -466,89 +697,180 @@ const AutoSchedule = () => {
       console.log('❌ Failed requests (missing resources):', failedSchedulesList.length);
       console.log('📊 Generated schedules so far:', schedules.length);
 
+      // Track which days have been used for each subject's sessions
+      const subjectSessionDays = {}; // { 'subjectId-sectionId': [usedDays] }
+
       // Process each scheduling request with uniform time slots across the week
       for (const request of schedulingRequests) {
         if (request.uniformSchedule) {
-          // Handle uniform schedule - same time slot across all available days
+          // Handle uniform schedule - each session on a single day
         let assigned = false;
         let attempts = 0;
-          const maxAttempts = timeSlots.length;
+          const maxAttempts = timeSlots.length * request.availableDays.length;
         
-        // Get available time slots for this teacher
-        const availableTimeSlots = timeSlots.filter(slot => {
-          const teacherStartTime = request.teacher.availableStartTime;
-          const teacherEndTime = request.teacher.availableEndTime;
-          return teacherStartTime <= slot.start && teacherEndTime >= slot.end;
-        });
+          // Get available time slots for this teacher (filter for 1.5 hour slots that don't span breaks)
+          const availableTimeSlots = timeSlots.filter(slot => {
+            const teacherStartTime = request.teacher.availableStartTime;
+            const teacherEndTime = request.teacher.availableEndTime;
+            // Calculate slot duration
+            const startTime = new Date(`2000-01-01 ${slot.start}`);
+            const endTime = new Date(`2000-01-01 ${slot.end}`);
+            const durationMinutes = (endTime - startTime) / (1000 * 60);
+            // Only use 1.5 hour (90 minute) slots that don't span across breaks
+            const is90Minutes = durationMinutes === 90;
+            const doesNotSpanBreaks = !spansAcrossBreak(slot.start, slot.end);
+            const doesNotOverlapBreaks = !overlapsWithBreak(slot.start, slot.end);
+            return teacherStartTime <= slot.start && teacherEndTime >= slot.end && is90Minutes && doesNotSpanBreaks && doesNotOverlapBreaks;
+          });
 
-          // Try to find a time slot that works for ALL available days
+          // Get days already used for this subject's other sessions
+          const subjectKey = `${request.subject.id || request.subject.name}-${request.section.id || request.section.sectionName}`;
+          const usedDaysForSubject = subjectSessionDays[subjectKey] || [];
+          const availableDaysForSession = request.availableDays.filter(day => !usedDaysForSubject.includes(day));
+
+          if (availableDaysForSession.length === 0) {
+            console.log(`⚠️ No available days for session ${request.sessionNumber} of ${request.subject.name} - ${request.section.sectionName} (other sessions already scheduled)`);
+            continue;
+          }
+
+          // Try to find a time slot that works for ONE available day
         while (!assigned && attempts < maxAttempts) {
           const timeSlot = getLeastUsedTimeSlot(availableTimeSlots);
           
             if (timeSlot) {
-              // Check if this time slot is available on ALL required days
+              // Try each available day for this session
+              for (const day of availableDaysForSession) {
+                if (assigned) break;
+                
+                // Check if this time slot is available on this day
               const availableClassroom = findBestAvailableClassroom(
                 request.suitableClassrooms, 
-                request.availableDays[0], // Use first day to find classroom
+                  day,
                 timeSlot, 
                 request.teacher, 
-                usedSlots
+                  usedSlots,
+                  request.section
               );
               
               if (availableClassroom) {
-                // Check if this time slot + classroom combination is available on required days
-                // Use the minimum of pattern days or subject duration to respect both constraints
-                const maxDays = Math.min(request.availableDays.length, request.totalDuration);
-                const requiredDays = request.availableDays.slice(0, maxDays);
-                let canUseOnRequiredDays = true;
-                
-                for (const day of requiredDays) {
+                  // First check if the overall 1.5-hour time slot conflicts with existing schedules
+                  const overallConflict = hasConflict(
+                    day, 
+                    timeSlot.start, 
+                    timeSlot.end, 
+                    request.teacher, 
+                    availableClassroom, 
+                    request.section
+                  );
+                  
+                  if (overallConflict.conflict) {
+                    // Skip this time slot due to conflict
+                    console.log(`⚠️ Overall conflict detected for ${request.subject.name} on ${day} at ${timeSlot.start}-${timeSlot.end}: ${overallConflict.reason}`);
+                    continue;
+                  }
+                  
+                  // Check exact slot match
                   const slotKey = `${day}-${timeSlot.start}-${timeSlot.end}-${request.teacher.id}-${availableClassroom.id}`;
                   if (usedSlots.has(slotKey)) {
-                    canUseOnRequiredDays = false;
-                    break;
-                  }
+                    continue;
                 }
                 
-                if (canUseOnRequiredDays) {
                   // Calculate duration and break into 15-minute individual schedule entries
                   const startTime = new Date(`2000-01-01 ${timeSlot.start}`);
                   const endTime = new Date(`2000-01-01 ${timeSlot.end}`);
                   const durationMinutes = (endTime - startTime) / (1000 * 60);
-                  const numberOfSlots = Math.floor(durationMinutes / 15);
+                  const numberOfSlots = Math.floor(durationMinutes / 15); // Should be 6 slots for 1.5 hours
                   
                   // Check if all consecutive slots are available
                   let allSlotsAvailable = true;
                   const individualSlots = [];
                   
                   for (let i = 0; i < numberOfSlots; i++) {
-                    const slotStartMinutes = startTime.getHours() * 60 + startTime.getMinutes() + (i * 15);
-                    const slotStartHours = Math.floor(slotStartMinutes / 60);
-                    const slotStartMins = slotStartMinutes % 60;
-                    const slotEndMinutes = slotStartMinutes + 15;
-                    const slotEndHours = Math.floor(slotEndMinutes / 60);
-                    const slotEndMins = slotEndMinutes % 60;
-                    
-                    const slotStartTime = `${String(slotStartHours).padStart(2, '0')}:${String(slotStartMins).padStart(2, '0')}`;
-                    const slotEndTime = `${String(slotEndHours).padStart(2, '0')}:${String(slotEndMins).padStart(2, '0')}`;
-                    
-                    individualSlots.push({ start: slotStartTime, end: slotEndTime });
-                    
-                    // Check if this slot is available on all required days
-                    for (const day of requiredDays) {
-                      const slotKey = `${day}-${slotStartTime}-${slotEndTime}-${request.teacher.id}-${availableClassroom.id}`;
-                      if (usedSlots.has(slotKey)) {
+                      const slotStartMinutes = startTime.getHours() * 60 + startTime.getMinutes() + (i * 15);
+                      const slotStartHours = Math.floor(slotStartMinutes / 60);
+                      const slotStartMins = slotStartMinutes % 60;
+                      const slotEndMinutes = slotStartMinutes + 15;
+                      const slotEndHours = Math.floor(slotEndMinutes / 60);
+                      const slotEndMins = slotEndMinutes % 60;
+                      
+                      const slotStartTime = `${String(slotStartHours).padStart(2, '0')}:${String(slotStartMins).padStart(2, '0')}`;
+                      const slotEndTime = `${String(slotEndHours).padStart(2, '0')}:${String(slotEndMins).padStart(2, '0')}`;
+                      
+                      // If the overall time slot doesn't span breaks, individual 15-minute slots shouldn't overlap breaks
+                      // But check anyway to be safe - if a slot overlaps a break, it means the time slot selection was wrong
+                      if (overlapsWithBreak(slotStartTime, slotEndTime)) {
+                        console.warn(`⚠️ Slot ${slotStartTime}-${slotEndTime} overlaps with break - this shouldn't happen if time slot selection is correct`);
+                        allSlotsAvailable = false;
+                        break;
+                      }
+                      
+                      // Check for conflicts with existing schedules for this specific 15-minute slot
+                      const slotConflict = hasConflict(
+                        day, 
+                        slotStartTime, 
+                        slotEndTime, 
+                        request.teacher, 
+                        availableClassroom, 
+                        request.section
+                      );
+                      
+                      if (slotConflict.conflict) {
+                        allSlotsAvailable = false;
+                        break;
+                      }
+                      
+                      individualSlots.push({ start: slotStartTime, end: slotEndTime });
+                      
+                      // Also check the usedSlots set for exact matches
+                      const daySlotKey = `${day}-${slotStartTime}-${slotEndTime}-${request.teacher.id}-${availableClassroom.id}`;
+                      if (usedSlots.has(daySlotKey)) {
                         allSlotsAvailable = false;
                         break;
                       }
                     }
-                    if (!allSlotsAvailable) break;
-                  }
-                  
-                  if (allSlotsAvailable) {
-                    // Create individual schedule entries for each 15-minute slot
-                    for (const day of requiredDays) {
+                    
+                    // Ensure we have exactly 6 slots (1.5 hours = 90 minutes = 6 × 15-minute slots)
+                    if (allSlotsAvailable && individualSlots.length === 6) {
+                      // Get IDs for conflict checking and adding to scheduledPeriods
+                      const teacherId = request.teacher?.id || request.teacher?.teacherId || request.teacherUser?.id;
+                      const classroomId = availableClassroom.id;
+                      const sectionId = request.section?.id || request.section?.sectionName || String(request.section);
+                      
+                      // Final safety check: verify no conflicts before creating schedules
+                      let finalCheckPassed = true;
+                      for (const slot of individualSlots) {
+                        const finalConflict = hasConflict(
+                          day, 
+                          slot.start, 
+                          slot.end, 
+                          request.teacher, 
+                          availableClassroom, 
+                          request.section
+                        );
+                        if (finalConflict.conflict) {
+                          finalCheckPassed = false;
+                          console.log(`⚠️ Conflict detected during final check: ${finalConflict.reason} - ${finalConflict.details}`);
+                          break;
+                        }
+                      }
+                      
+                      if (!finalCheckPassed) {
+                        attempts++;
+                        continue;
+                      }
+                      
+                      // Verify we still have 6 slots after all checks
+                      if (individualSlots.length !== 6) {
+                        console.warn(`⚠️ Expected 6 slots but got ${individualSlots.length} for ${timeSlot.start}-${timeSlot.end}`);
+                        attempts++;
+                        continue;
+                      }
+                      
+                      // Create individual schedule entries for each 15-minute slot (on single day)
                       let slotIndex = 0;
+                      const firstSlot = individualSlots[0];
+                      const lastSlot = individualSlots[individualSlots.length - 1];
+                      
                       for (const slot of individualSlots) {
                         const schedule = {
                           date: new Date().toISOString().split('T')[0],
@@ -559,10 +881,12 @@ const AutoSchedule = () => {
                           classroom: availableClassroom,
                           subject: request.subject.name,
                           section: request.section,
-                          subjectDuration: request.totalDuration,
+                          subjectDuration: 3, // Total 3 hours per subject (2 sessions × 1.5h)
+                          sessionNumber: request.sessionNumber,
+                          totalSessions: request.totalSessions,
                           durationIndex: slotIndex,
                           schoolYearId: selectedSchoolYear,
-                          notes: `Auto-generated schedule for ${request.section.sectionName} - ${request.subject.name} (Slot ${slotIndex + 1}/${numberOfSlots})`,
+                          notes: `Auto-generated schedule for ${request.section.sectionName} - ${request.subject.name} (Session ${request.sessionNumber}/${request.totalSessions}, Slot ${slotIndex + 1}/${individualSlots.length})`,
                           isRecurring: true,
                           status: 'scheduled'
                         };
@@ -570,8 +894,8 @@ const AutoSchedule = () => {
                         schedules.push(schedule);
                         
                         // Mark this slot as used
-                        const slotKey = `${day}-${slot.start}-${slot.end}-${request.teacher.id}-${availableClassroom.id}`;
-                        usedSlots.add(slotKey);
+                        const daySlotKey = `${day}-${slot.start}-${slot.end}-${request.teacher.id}-${availableClassroom.id}`;
+                        usedSlots.add(daySlotKey);
                         
                         // Update usage counters
                         dayUsage[day]++;
@@ -580,19 +904,36 @@ const AutoSchedule = () => {
                         
                         slotIndex++;
                       }
-                    }
+                      
+                      // Add the entire session period to scheduledPeriods to prevent future conflicts
+                      // Use first and last slot times to represent the full session
+                      if (firstSlot && lastSlot && teacherId && classroomId && sectionId) {
+                        addScheduledPeriod(
+                          day,
+                          String(teacherId),
+                          String(classroomId),
+                          String(sectionId),
+                          firstSlot.start,
+                          lastSlot.end
+                        );
+                      }
+                      
+                      // Track that this day is used for this subject
+                      if (!subjectSessionDays[subjectKey]) {
+                        subjectSessionDays[subjectKey] = [];
+                      }
+                      subjectSessionDays[subjectKey].push(day);
                     
-                    classroomUsage[availableClassroom.id] = (classroomUsage[availableClassroom.id] || 0) + (requiredDays.length * numberOfSlots);
+                      classroomUsage[availableClassroom.id] = (classroomUsage[availableClassroom.id] || 0) + individualSlots.length;
                     
                     assigned = true;
-                    console.log(`✅ Assigned ${numberOfSlots} individual schedules for ${request.section.sectionName} - ${request.subject.name} starting at ${timeSlot.start} on ${requiredDays.length} days (${requiredDays.join(', ')}) - Total: ${requiredDays.length * numberOfSlots} schedule entries`);
-                  } else {
-                    attempts++;
+                      console.log(`✅ Assigned session ${request.sessionNumber}/${request.totalSessions} (${individualSlots.length} slots = ${request.totalDuration}h) for ${request.section.sectionName} - ${request.subject.name} starting at ${timeSlot.start} on ${day} - Total: ${individualSlots.length} schedule entries`);
+                      break;
                   }
-                } else {
-                  attempts++;
                 }
-              } else {
+                }
+              
+              if (!assigned) {
                 attempts++;
               }
             } else {
@@ -606,11 +947,11 @@ const AutoSchedule = () => {
               section: request.section.sectionName,
               subject: request.subject.name,
               reason: 'No uniform time slot available',
-              details: `No time slot found that works across all ${request.availableDays.length} available days for ${request.teacher.firstName} ${request.teacher.lastName}`,
+              details: `No time slot found that works for session ${request.sessionNumber}/${request.totalSessions} for ${request.teacher.firstName} ${request.teacher.lastName}`,
               type: 'time_conflict',
               resolution: 'Add more time slots, reduce subject duration, or add more teachers/classrooms to increase availability'
             });
-            console.log(`Could not assign uniform schedule for ${request.section.sectionName} - ${request.subject.name}`);
+            console.log(`Could not assign uniform schedule for ${request.section.sectionName} - ${request.subject.name} (Session ${request.sessionNumber}/${request.totalSessions})`);
           }
         }
       }
@@ -693,6 +1034,9 @@ const AutoSchedule = () => {
         savedToDatabase: savedCount,
         failedToSave: failedCount
       });
+      
+      // Reload existing schedules after generation to ensure conflict checking works on subsequent runs
+      await loadExistingSchedules();
     } catch (err) {
       console.error('Schedule generation error:', err);
       setError(`Failed to generate schedule: ${err.message || err.toString()}`);
@@ -889,12 +1233,8 @@ const AutoSchedule = () => {
           <CardContent sx={{ pt: 0 }}>
           <Grid container spacing={2}>
             {schedulePatterns.map(pattern => {
-              // Count subjects that would use this pattern based on their duration
-              const subjectCount = subjects.filter(subject => {
-                const duration = parseInt(subject.durationPerWeek) || 1;
-                const optimalPattern = getOptimalSchedulePattern(duration);
-                return optimalPattern === pattern.value;
-              }).length;
+              // Count subjects (all use DAILY pattern now)
+              const subjectCount = pattern.value === 'DAILY' ? subjects.length : 0;
               const totalDays = pattern.days.length;
               
               return (
@@ -923,7 +1263,7 @@ const AutoSchedule = () => {
             })}
           </Grid>
           <Typography variant="body2" sx={{ mt: 2, opacity: 0.9 }}>
-            💡 Schedule patterns are automatically assigned based on subject duration: 1-2h→TTH, 3h→MWF, 4+h→DAILY for optimal week utilization.
+            💡 All schedules are distributed across all weekdays (Monday-Friday).
           </Typography>
           </CardContent>
         </Collapse>
@@ -1274,19 +1614,20 @@ const AutoSchedule = () => {
                   sections.some(section => section.selectedSubjects?.includes(subject.id))
                 ).map(subject => {
                   const subjectSchedules = generatedSchedules.filter(s => s.subject === subject.name);
-                  const totalHours = subjectSchedules.length;
-                  const expectedHours = parseInt(subject.durationPerWeek) || 1;
+                  const totalSlots = subjectSchedules.length;
+                  // Fixed: All subjects are 3 hours = 2 sessions × 1.5h = 2 sessions × 6 slots = 12 slots per section
+                  const slotsPerSection = 12; // 2 sessions × 6 slots (15-min each) = 12 slots
                   const sectionsCount = sections.filter(section => 
                     section.selectedSubjects?.includes(subject.id)
                   ).length;
-                  const expectedTotal = expectedHours * sectionsCount;
+                  const expectedTotal = slotsPerSection * sectionsCount;
                   return (
                     <Box key={subject.name} sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                       <Typography variant="body2">{subject.name}:</Typography>
                       <Chip 
-                        label={`${totalHours}/${expectedTotal} hours`} 
+                        label={`${totalSlots}/${expectedTotal} slots`} 
                         size="small" 
-                        color={totalHours === expectedTotal ? "success" : "warning"} 
+                        color={totalSlots === expectedTotal ? "success" : "warning"} 
                       />
                     </Box>
                   );
@@ -1337,9 +1678,8 @@ const AutoSchedule = () => {
                         </TableCell>
                       <TableCell>
                         <Chip 
-                          label={getOptimalSchedulePattern(schedule.subjectDuration || schedule.totalDuration || 1)} 
-                          color={getOptimalSchedulePattern(schedule.subjectDuration || schedule.totalDuration || 1) === 'MWF' ? 'secondary' : 
-                                 getOptimalSchedulePattern(schedule.subjectDuration || schedule.totalDuration || 1) === 'TTH' ? 'warning' : 'info'}
+                          label="DAILY" 
+                          color="info"
                           size="small" 
                         />
                       </TableCell>
@@ -1348,9 +1688,9 @@ const AutoSchedule = () => {
                           <Typography variant="body2" fontWeight="bold">
                             {schedule.subject}
                           </Typography>
-                          {schedule.subjectDuration > 1 && (
+                          {schedule.sessionNumber && (
                             <Typography variant="caption" color="textSecondary">
-                              Hour {schedule.durationIndex + 1}/{schedule.subjectDuration} (distributed across week)
+                              Session {schedule.sessionNumber}/{schedule.totalSessions || 2} - Slot {schedule.durationIndex + 1}/6
                             </Typography>
                           )}
                         </Box>
@@ -1518,7 +1858,7 @@ const AutoSchedule = () => {
                   return scheduleTeacherId === user.id || scheduleTeacherId === teacherData?.id;
                 }).length;
                 const teacherSubjects = subjects.filter(subject => userSubjects.includes(subject.name));
-                const maxPossibleLoad = teacherSubjects.reduce((sum, subject) => sum + (parseInt(subject.durationPerWeek) || 1), 0);
+                const maxPossibleLoad = teacherSubjects.reduce((sum, subject) => sum + 3, 0); // Fixed: All subjects are 3 hours
                 const workloadPercent = maxPossibleLoad > 0 ? Math.round((scheduleCount / maxPossibleLoad) * 100) : 0;
                 
                 if (userSubjects.length === 0) return null;

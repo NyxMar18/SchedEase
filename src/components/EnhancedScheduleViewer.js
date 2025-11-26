@@ -623,6 +623,8 @@ const EnhancedScheduleViewer = () => {
                 // 15-minute time slots to support flexible scheduling
                 // Excludes break times: 9:00-9:15 (morning break), 12:15-13:15 (lunch), 16:15-16:30 (afternoon break)
                 const timeSlots = [
+                  { start: '07:30', end: '07:45' },
+                  { start: '07:45', end: '08:00' },
                   { start: '08:00', end: '08:15' },
                   { start: '08:15', end: '08:30' },
                   { start: '08:30', end: '08:45' },
@@ -654,6 +656,14 @@ const EnhancedScheduleViewer = () => {
                   { start: '15:45', end: '16:00' },
                   { start: '16:00', end: '16:15' },
                   // Break: 16:15-16:30 (excluded)
+                  { start: '16:30', end: '16:45' },
+                  { start: '16:45', end: '17:00' },
+                  { start: '17:00', end: '17:15' },
+                  { start: '17:15', end: '17:30' },
+                  { start: '17:30', end: '17:45' },
+                  { start: '17:45', end: '18:00' },
+                  { start: '18:00', end: '18:15' },
+                  { start: '18:15', end: '18:30' },
                 ];
                 
                 // Break periods to display
