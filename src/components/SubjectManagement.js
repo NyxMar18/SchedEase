@@ -23,6 +23,7 @@ import {
   Card,
   CardContent,
   FormControl,
+  FormControlLabel,
   InputLabel,
   Select,
   MenuItem,
@@ -51,17 +52,17 @@ const SubjectManagement = () => {
     category: '',
     requiredRoomTypes: [], // Array of {type: string, duration: number}
     durationPerWeek: '',
+    combineRoomTypes: false, // Combine multiple room types into one session
+    gradeLevel: '', // Grade 11 or Grade 12
   });
 
   const categories = [
     'Core',
     'Applied',
     'Specialized'
-   
-
-  
-
   ];
+
+  const gradeLevels = ['Grade 11', 'Grade 12'];
 
 
   const roomTypes = [
@@ -117,6 +118,8 @@ const SubjectManagement = () => {
         category: subject.category || '',
         requiredRoomTypes: roomTypes,
         durationPerWeek: subject.durationPerWeek || '',
+        combineRoomTypes: subject.combineRoomTypes || subject.useMultipleRoomTypesInOneSession || false,
+        gradeLevel: subject.gradeLevel || '',
       });
     } else {
       setEditingSubject(null);
@@ -127,6 +130,8 @@ const SubjectManagement = () => {
         category: '',
         requiredRoomTypes: [],
         durationPerWeek: '',
+        combineRoomTypes: false,
+        gradeLevel: '',
       });
     }
     setOpen(true);
@@ -142,6 +147,7 @@ const SubjectManagement = () => {
       category: '',
       requiredRoomTypes: [],
       durationPerWeek: '',
+      gradeLevel: '',
     });
   };
 
@@ -222,10 +228,7 @@ const SubjectManagement = () => {
     const categoryColors = {
       'Core': 'primary',
       'Applied': 'success',
-      'SSpecialized': 'info'
-
-
-      
+      'Specialized': 'info'
     };
     
     return (
@@ -282,11 +285,11 @@ const SubjectManagement = () => {
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Typography variant="h4" color="info.main">
-                {subjects.filter(s => s.category === 'Mathematics').length} 
+              <Typography variant="h4" color="primary.main">
+                {subjects.filter(s => s.category === 'Core').length}
               </Typography>
               <Typography variant="body2" color="textSecondary">
-                Math Subjects
+                Core Subjects
               </Typography>
             </CardContent>
           </Card>
@@ -294,11 +297,23 @@ const SubjectManagement = () => {
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>
-              <Typography variant="h4" color="warning.main">
-                {subjects.filter(s => s.category === 'Science').length}
+              <Typography variant="h4" color="success.main">
+                {subjects.filter(s => s.category === 'Applied').length}
               </Typography>
               <Typography variant="body2" color="textSecondary">
-                Science Subjects
+                Applied Subjects
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Typography variant="h4" color="info.main">
+                {subjects.filter(s => s.category === 'Specialized').length}
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                Specialized Subjects
               </Typography>
             </CardContent>
           </Card>
@@ -315,6 +330,7 @@ const SubjectManagement = () => {
                   <TableCell>Subject Name</TableCell>
                   <TableCell>Code</TableCell>
                   <TableCell>Category</TableCell>
+                  <TableCell>Grade Level</TableCell>
                   <TableCell>Required Room</TableCell>
                   <TableCell>Duration/Week</TableCell>
                   <TableCell>Actions</TableCell>
@@ -333,6 +349,9 @@ const SubjectManagement = () => {
                   </TableCell>
                   <TableCell>
                     {getCategoryChip(subject.category)}
+                  </TableCell>
+                  <TableCell>
+                    <Chip label={subject.gradeLevel || 'N/A'} color="secondary" size="small" />
                   </TableCell>
                   <TableCell>
                     {(() => {
@@ -410,22 +429,36 @@ const SubjectManagement = () => {
               />
             </Grid>
             <Grid item xs={12} sm={6}>
-              <TextField
-                value={formData.category}
-                onChange={handleChange('category')}
-                fullWidth
-                select
-                SelectProps={{
-                  native: true,
-                }}
-              >
-                <option value="">Select Category</option>
-                {categories.map((category) => (
-                  <option key={category} value={category}>
-                    {category}
-                  </option>
-                ))}
-              </TextField>
+              <FormControl fullWidth required>
+                <InputLabel>Category</InputLabel>
+                <Select
+                  value={formData.category}
+                  onChange={handleChange('category')}
+                  label="Category"
+                >
+                  {categories.map((category) => (
+                    <MenuItem key={category} value={category}>
+                      {category}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth required>
+                <InputLabel>Grade Level</InputLabel>
+                <Select
+                  value={formData.gradeLevel}
+                  onChange={handleChange('gradeLevel')}
+                  label="Grade Level"
+                >
+                  {gradeLevels.map((level) => (
+                    <MenuItem key={level} value={level}>
+                      {level}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
             </Grid>
             <Grid item xs={12} sm={6}>
               <TextField
@@ -512,6 +545,32 @@ const SubjectManagement = () => {
                 <Typography variant="caption" color="textSecondary" sx={{ mt: 1, display: 'block' }}>
                   Total allocated: {formData.requiredRoomTypes?.reduce((sum, rt) => sum + (parseFloat(rt.duration) || 0), 0).toFixed(1) || 0}h / {formData.durationPerWeek || 0}h
                 </Typography>
+                {formData.requiredRoomTypes && formData.requiredRoomTypes.length > 1 && (
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={formData.combineRoomTypes || false}
+                        onChange={(e) => {
+                          setFormData(prev => ({
+                            ...prev,
+                            combineRoomTypes: e.target.checked
+                          }));
+                        }}
+                      />
+                    }
+                    label={
+                      <Box>
+                        <Typography variant="body2">
+                          Combine multiple room types into one session
+                        </Typography>
+                        <Typography variant="caption" color="textSecondary">
+                          If checked, all selected room types will be used in a single 1.5-hour session instead of separate sessions
+                        </Typography>
+                      </Box>
+                    }
+                    sx={{ mt: 1 }}
+                  />
+                )}
               </FormControl>
             </Grid>
             <Grid item xs={12}>

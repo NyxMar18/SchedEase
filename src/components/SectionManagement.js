@@ -57,8 +57,23 @@ const SectionManagement = () => {
   const tracks = ['STEM', 'ABM', 'HUMSS', 'GAS', 'TVL'];
   const gradeLevels = ['Grade 11', 'Grade 12'];
 
+  // Filter subjects based on selected grade level
+  const getFilteredSubjects = useMemo(() => {
+    if (!formData.gradeLevel) {
+      return subjects;
+    }
+    
+    // Filter subjects that match the selected grade level
+    return subjects.filter(subject => {
+      // If subject has no gradeLevel, include it (for backward compatibility)
+      if (!subject.gradeLevel) return true;
+      // Match exact grade level
+      return subject.gradeLevel === formData.gradeLevel;
+    });
+  }, [subjects, formData.gradeLevel]);
+
   const groupedSubjects = useMemo(() => {
-    const groups = subjects.reduce((acc, subject) => {
+    const groups = getFilteredSubjects.reduce((acc, subject) => {
       const category = subject.category || 'Uncategorized';
       if (!acc[category]) {
         acc[category] = [];
@@ -73,7 +88,7 @@ const SectionManagement = () => {
         category,
         items.sort((a, b) => (a.name || '').localeCompare(b.name || '')),
       ]);
-  }, [subjects]);
+  }, [getFilteredSubjects]);
 
   useEffect(() => {
     fetchSections();
@@ -170,10 +185,34 @@ const SectionManagement = () => {
   };
 
   const handleChange = (field) => (event) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: event.target.value,
-    }));
+    const newValue = event.target.value;
+    
+    // If grade level changes, filter out subjects that don't match the new grade level
+    if (field === 'gradeLevel') {
+      setFormData(prev => {
+        const newGradeLevel = newValue;
+        // Filter selectedSubjects to only keep those that match the new grade level
+        const validSubjects = prev.selectedSubjects.filter(subjectId => {
+          const subject = subjects.find(s => s.id === subjectId);
+          if (!subject) return false;
+          // If subject has no gradeLevel, keep it (backward compatibility)
+          if (!subject.gradeLevel) return true;
+          // Keep if it matches the new grade level
+          return subject.gradeLevel === newGradeLevel;
+        });
+        
+        return {
+          ...prev,
+          [field]: newValue,
+          selectedSubjects: validSubjects
+        };
+      });
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        [field]: newValue,
+      }));
+    }
   };
 
   const handleSubjectToggle = (subjectId) => {
@@ -183,6 +222,14 @@ const SectionManagement = () => {
         : [...prev.selectedSubjects, subjectId];
       return { ...prev, selectedSubjects: newSubjects };
     });
+  };
+
+  // Get background color for subject based on grade level
+  const getSubjectGradeColor = (gradeLevel) => {
+    if (!gradeLevel) return 'transparent';
+    if (gradeLevel === 'Grade 11') return '#e3f2fd'; // Light blue
+    if (gradeLevel === 'Grade 12') return '#f3e5f5'; // Light purple
+    return 'transparent';
   };
 
   return (
@@ -313,10 +360,19 @@ const SectionManagement = () => {
             <Grid item xs={12}>
               <Typography variant="subtitle1" gutterBottom>
                 Select Subjects for this Section:
+                {formData.gradeLevel && (
+                  <Typography variant="caption" color="textSecondary" sx={{ ml: 1 }}>
+                    (Showing subjects for {formData.gradeLevel})
+                  </Typography>
+                )}
               </Typography>
-              {subjects.length === 0 ? (
+              {!formData.gradeLevel ? (
+                <Alert severity="warning">
+                  Please select a grade level first to see available subjects.
+                </Alert>
+              ) : getFilteredSubjects.length === 0 ? (
                 <Alert severity="info">
-                  No subjects available. Please add subjects first.
+                  No subjects available for {formData.gradeLevel}. Please add subjects for this grade level in Subject Management.
                 </Alert>
               ) : (
                 groupedSubjects.map(([category, categorySubjects]) => (
@@ -334,7 +390,22 @@ const SectionManagement = () => {
                               onChange={() => handleSubjectToggle(subject.id)}
                             />
                           }
-                          label={subject.name || 'Untitled Subject'}
+                          label={`${subject.name || 'Untitled Subject'}${subject.gradeLevel ? ` (${subject.gradeLevel})` : ''}`}
+                          sx={{
+                            backgroundColor: getSubjectGradeColor(subject.gradeLevel),
+                            borderRadius: 1,
+                            px: 1,
+                            py: 0.5,
+                            mr: 1,
+                            mb: 0.5,
+                            '&:hover': {
+                              backgroundColor: subject.gradeLevel === 'Grade 11' 
+                                ? '#bbdefb' 
+                                : subject.gradeLevel === 'Grade 12' 
+                                ? '#e1bee7' 
+                                : 'rgba(0, 0, 0, 0.04)'
+                            }
+                          }}
                         />
                       ))}
                     </FormGroup>

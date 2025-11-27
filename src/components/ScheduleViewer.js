@@ -52,6 +52,7 @@ import {
 } from '@mui/icons-material';
 import { scheduleAPI, classroomAPI, teacherAPI } from '../services/api';
 import { sectionFirestoreAPI } from '../firebase/sectionFirestoreService';
+import { subjectAPI } from '../firebase/subjectService';
 import { useAuth } from '../contexts/AuthContext';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, getDocs, query, orderBy } from 'firebase/firestore';
@@ -325,6 +326,7 @@ const ScheduleViewer = () => {
   const [classrooms, setClassrooms] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [sections, setSections] = useState([]);
+  const [subjects, setSubjects] = useState([]);
   const [schoolYears, setSchoolYears] = useState([]);
   const [selectedSchoolYear, setSelectedSchoolYear] = useState('');
   const [loading, setLoading] = useState(true);
@@ -444,26 +446,30 @@ const ScheduleViewer = () => {
         // For teachers, we don't need to load all classrooms, teachers, and sections
         // since they can only see their own schedules
         if (isAdmin()) {
-          const [classroomsRes, teachersRes, sectionsRes] = await Promise.all([
+          const [classroomsRes, teachersRes, sectionsRes, subjectsRes] = await Promise.all([
             classroomAPI.getAll(),
             teacherAPI.getAll(),
             sectionFirestoreAPI.getAll(),
+            subjectAPI.getAll(),
           ]);
           
           setClassrooms(classroomsRes.data);
           setTeachers(teachersRes.data);
           setSections(sectionsRes.data);
+          setSubjects(subjectsRes.data);
         } else {
           // For teachers, we still need some data for display purposes
-          const [classroomsRes, teachersRes, sectionsRes] = await Promise.all([
+          const [classroomsRes, teachersRes, sectionsRes, subjectsRes] = await Promise.all([
             classroomAPI.getAll(),
             teacherAPI.getAll(),
             sectionFirestoreAPI.getAll(),
+            subjectAPI.getAll(),
           ]);
           
           setClassrooms(classroomsRes.data);
           setTeachers(teachersRes.data);
           setSections(sectionsRes.data);
+          setSubjects(subjectsRes.data);
         }
         
         setError(null);
@@ -791,10 +797,20 @@ const ScheduleViewer = () => {
   // Handle add form changes
   const handleAddFormChange = (field) => (event) => {
     const newValue = event.target.type === 'checkbox' ? event.target.checked : event.target.value;
-    setAddFormData(prev => ({
-      ...prev,
-      [field]: newValue
-    }));
+    
+    // If section changes, reset subject to ensure it matches the new section's grade level
+    if (field === 'section') {
+      setAddFormData(prev => ({
+        ...prev,
+        [field]: newValue,
+        subject: '' // Reset subject when section changes
+      }));
+    } else {
+      setAddFormData(prev => ({
+        ...prev,
+        [field]: newValue
+      }));
+    }
 
     // Auto-set day of week when date changes
     if (field === 'date' && newValue) {
@@ -1088,6 +1104,44 @@ const ScheduleViewer = () => {
       case 'cancelled': return 'error';
       default: return 'default';
     }
+  };
+
+  // Filter subjects based on section grade level
+  const getFilteredSubjects = (sectionId, currentSubject = '') => {
+    if (!sectionId) return subjects;
+    
+    const selectedSection = sections.find(s => {
+      // Handle both string and object formats
+      if (typeof sectionId === 'string') {
+        return s.id === sectionId || s.sectionName === sectionId;
+      }
+      return s.id === sectionId;
+    });
+    
+    if (!selectedSection || !selectedSection.gradeLevel) return subjects;
+    
+    // Filter subjects that match the section's grade level
+    const filtered = subjects.filter(subject => {
+      // Always include the current subject (for backward compatibility)
+      const subjectName = subject.name || subject.id || '';
+      if (currentSubject && (subjectName === currentSubject || subject.id === currentSubject)) {
+        return true;
+      }
+      // If subject has no gradeLevel, include it (for backward compatibility)
+      if (!subject.gradeLevel) return true;
+      // Match exact grade level
+      return subject.gradeLevel === selectedSection.gradeLevel;
+    });
+    
+    return filtered;
+  };
+
+  // Get background color for subject based on grade level
+  const getSubjectGradeColor = (gradeLevel) => {
+    if (!gradeLevel) return 'transparent';
+    if (gradeLevel === 'Grade 11') return '#e3f2fd'; // Light blue
+    if (gradeLevel === 'Grade 12') return '#f3e5f5'; // Light purple
+    return 'transparent';
   };
 
   const convertToTwelveHour = (timeStr) => {
@@ -2160,13 +2214,45 @@ const ScheduleViewer = () => {
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Subject"
-                value={addFormData.subject}
-                onChange={handleAddFormChange('subject')}
-                required
-              />
+              <FormControl fullWidth required>
+                <InputLabel>Subject</InputLabel>
+                <Select
+                  value={addFormData.subject}
+                  label="Subject"
+                  onChange={handleAddFormChange('subject')}
+                  disabled={!addFormData.section || getFilteredSubjects(addFormData.section).length === 0}
+                >
+                  {getFilteredSubjects(addFormData.section).length === 0 ? (
+                    <MenuItem disabled value="">
+                      No subjects available for this section's grade level
+                    </MenuItem>
+                  ) : (
+                    getFilteredSubjects(addFormData.section).map((subject) => (
+                      <MenuItem 
+                        key={subject.id || subject.name} 
+                        value={subject.name || subject.id}
+                        sx={{
+                          backgroundColor: getSubjectGradeColor(subject.gradeLevel),
+                          '&:hover': {
+                            backgroundColor: subject.gradeLevel === 'Grade 11' 
+                              ? '#bbdefb' 
+                              : subject.gradeLevel === 'Grade 12' 
+                              ? '#e1bee7' 
+                              : 'rgba(0, 0, 0, 0.04)'
+                          }
+                        }}
+                      >
+                        {subject.name} {subject.gradeLevel && `(${subject.gradeLevel})`}
+                      </MenuItem>
+                    ))
+                  )}
+                </Select>
+              </FormControl>
+              {addFormData.section && getFilteredSubjects(addFormData.section).length === 0 && (
+                <Typography variant="caption" color="warning.main" sx={{ mt: 0.5, display: 'block' }}>
+                  Please select a section first, or add subjects for this grade level in Subject Management.
+                </Typography>
+              )}
             </Grid>
             <Grid item xs={12}>
               <TextField
@@ -2336,13 +2422,37 @@ const ScheduleViewer = () => {
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Subject"
-                value={editFormData.subject}
-                onChange={handleEditFormChange('subject')}
-                required
-              />
+              <FormControl fullWidth required>
+                <InputLabel>Subject</InputLabel>
+                <Select
+                  value={editFormData.subject}
+                  label="Subject"
+                  onChange={handleEditFormChange('subject')}
+                >
+                  {(() => {
+                    // For edit, we need to get the section from editingSchedule
+                    const sectionId = editingSchedule?.section?.id || editingSchedule?.section;
+                    return getFilteredSubjects(sectionId, editFormData.subject).map((subject) => (
+                      <MenuItem 
+                        key={subject.id || subject.name} 
+                        value={subject.name || subject.id}
+                        sx={{
+                          backgroundColor: getSubjectGradeColor(subject.gradeLevel),
+                          '&:hover': {
+                            backgroundColor: subject.gradeLevel === 'Grade 11' 
+                              ? '#bbdefb' 
+                              : subject.gradeLevel === 'Grade 12' 
+                              ? '#e1bee7' 
+                              : 'rgba(0, 0, 0, 0.04)'
+                          }
+                        }}
+                      >
+                        {subject.name} {subject.gradeLevel && `(${subject.gradeLevel})`}
+                      </MenuItem>
+                    ));
+                  })()}
+                </Select>
+              </FormControl>
             </Grid>
             <Grid item xs={12}>
               <TextField
