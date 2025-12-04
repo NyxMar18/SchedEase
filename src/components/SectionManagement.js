@@ -27,28 +27,39 @@ import {
   FormGroup,
   FormControlLabel,
   Checkbox,
+  Menu,
+  Card,
+  CardContent,
 } from '@mui/material';
 import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
   Group as GroupIcon,
+  CalendarToday as CalendarTodayIcon,
+  ArrowDropDown as ArrowDropDownIcon,
 } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 import { sectionAPI } from '../firebase/sectionService';
 import { subjectAPI } from '../firebase/subjectService';
 
 const SectionManagement = () => {
+  const navigate = useNavigate();
   const [sections, setSections] = useState([]);
+  const [filteredSections, setFilteredSections] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [open, setOpen] = useState(false);
   const [editingSection, setEditingSection] = useState(null);
+  const [scheduleMenuAnchor, setScheduleMenuAnchor] = useState(null);
+  const [selectedSemesterFilter, setSelectedSemesterFilter] = useState('');
   const [formData, setFormData] = useState({
     sectionName: '',
     track: '',
     gradeLevel: '',
+    semester: '',
     maxStudents: '',
     selectedSubjects: [],
     description: '',
@@ -56,6 +67,7 @@ const SectionManagement = () => {
 
   const tracks = ['STEM', 'ABM', 'HUMSS', 'GAS', 'TVL'];
   const gradeLevels = ['Grade 11', 'Grade 12'];
+  const semesters = ['Semester 1', 'Semester 2'];
 
   // Filter subjects based on selected grade level
   const getFilteredSubjects = useMemo(() => {
@@ -94,6 +106,16 @@ const SectionManagement = () => {
     fetchSections();
   }, []);
 
+  // Filter sections by semester
+  useEffect(() => {
+    if (selectedSemesterFilter) {
+      const filtered = sections.filter(section => section.semester === selectedSemesterFilter);
+      setFilteredSections(filtered);
+    } else {
+      setFilteredSections(sections);
+    }
+  }, [sections, selectedSemesterFilter]);
+
   const fetchSections = async () => {
     try {
       setLoading(true);
@@ -116,9 +138,9 @@ const SectionManagement = () => {
       setEditingSection(section);
       setFormData({
         sectionName: section.sectionName,
-
         track: section.track,
         gradeLevel: section.gradeLevel,
+        semester: section.semester || '',
         maxStudents: section.maxStudents.toString(),
         selectedSubjects: section.selectedSubjects || [],
         description: section.description || '',
@@ -129,6 +151,7 @@ const SectionManagement = () => {
         sectionName: '',
         track: '',
         gradeLevel: '',
+        semester: '',
         maxStudents: '',
         selectedSubjects: [],
         description: '',
@@ -144,6 +167,7 @@ const SectionManagement = () => {
       sectionName: '',
       track: '',
       gradeLevel: '',
+      semester: '',
       maxStudents: '',
       selectedSubjects: [],
       description: '',
@@ -232,6 +256,21 @@ const SectionManagement = () => {
     return 'transparent';
   };
 
+  // Handle create schedule menu
+  const handleCreateScheduleClick = (event) => {
+    setScheduleMenuAnchor(event.currentTarget);
+  };
+
+  const handleCreateScheduleClose = () => {
+    setScheduleMenuAnchor(null);
+  };
+
+  const handleSelectSemesterForSchedule = (semester) => {
+    handleCreateScheduleClose();
+    // Navigate to auto schedule with semester in state
+    navigate('/auto-schedule', { state: { selectedSemester: semester } });
+  };
+
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
@@ -239,14 +278,74 @@ const SectionManagement = () => {
           <GroupIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
           Section Management
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => handleOpen()}
-        >
-          Add Section
-        </Button>
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Button
+            variant="outlined"
+            startIcon={<CalendarTodayIcon />}
+            endIcon={<ArrowDropDownIcon />}
+            onClick={handleCreateScheduleClick}
+          >
+            Create Schedule
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => handleOpen()}
+          >
+            Add Section
+          </Button>
+        </Box>
       </Box>
+
+      {/* Semester Filter */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+            <Typography variant="subtitle1" fontWeight="medium">
+              Filter by Semester:
+            </Typography>
+            <FormControl sx={{ minWidth: 200 }}>
+              <InputLabel>Semester</InputLabel>
+              <Select
+                value={selectedSemesterFilter}
+                onChange={(e) => setSelectedSemesterFilter(e.target.value)}
+                label="Semester"
+              >
+                <MenuItem value="">All Semesters</MenuItem>
+                <MenuItem value="Semester 1">Semester 1</MenuItem>
+                <MenuItem value="Semester 2">Semester 2</MenuItem>
+              </Select>
+            </FormControl>
+            {selectedSemesterFilter && (
+              <Chip 
+                label={`${filteredSections.length} section${filteredSections.length !== 1 ? 's' : ''} in ${selectedSemesterFilter}`} 
+                color="primary" 
+                variant="filled"
+                onDelete={() => setSelectedSemesterFilter('')}
+              />
+            )}
+            {!selectedSemesterFilter && (
+              <Typography variant="body2" color="textSecondary">
+                Showing all {sections.length} sections
+              </Typography>
+            )}
+          </Box>
+        </CardContent>
+      </Card>
+
+      {/* Semester Selection Menu for Creating Schedule */}
+      <Menu
+        anchorEl={scheduleMenuAnchor}
+        open={Boolean(scheduleMenuAnchor)}
+        onClose={handleCreateScheduleClose}
+      >
+        <MenuItem onClick={() => handleSelectSemesterForSchedule('Semester 1')}>
+          Semester 1
+        </MenuItem>
+        <MenuItem onClick={() => handleSelectSemesterForSchedule('Semester 2')}>
+          Semester 2
+        </MenuItem>
+      </Menu>
 
       {loading ? (
         <Typography>Loading...</Typography>
@@ -258,40 +357,56 @@ const SectionManagement = () => {
                   <TableCell>Section Name</TableCell>
                   <TableCell>Track</TableCell>
                   <TableCell>Grade Level</TableCell>
+                  <TableCell>Semester</TableCell>
                   <TableCell>Subjects</TableCell>
                   <TableCell>Max Students</TableCell>
                   <TableCell>Actions</TableCell>
                 </TableRow>
             </TableHead>
             <TableBody>
-              {sections.map((section) => (
-                <TableRow key={section.id}>
-                  <TableCell>{section.sectionName}</TableCell>
-                  <TableCell>
-                    <Chip label={section.track} color="primary" size="small" />
-                  </TableCell>
-                  <TableCell>
-                    <Chip label={section.gradeLevel} color="secondary" size="small" />
-                  </TableCell>
-                  <TableCell>
-                    {section.selectedSubjects?.map(subjectId => {
-                      const subject = subjects.find(s => s.id === subjectId);
-                      return subject ? (
-                        <Chip key={subjectId} label={subject.name} color="info" size="small" sx={{ mr: 0.5, mb: 0.5 }} />
-                      ) : null;
-                    }) || '-'}
-                  </TableCell>
-                  <TableCell>{section.maxStudents}</TableCell>
-                  <TableCell>
-                    <IconButton onClick={() => handleOpen(section)}>
-                      <EditIcon />
-                    </IconButton>
-                    <IconButton onClick={() => handleDelete(section.id)} color="error">
-                      <DeleteIcon />
-                    </IconButton>
+              {filteredSections.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} align="center">
+                    <Typography variant="body2" color="textSecondary">
+                      {selectedSemesterFilter 
+                        ? `No sections found for ${selectedSemesterFilter}`
+                        : 'No sections available'}
+                    </Typography>
                   </TableCell>
                 </TableRow>
-              ))}
+              ) : (
+                filteredSections.map((section) => (
+                  <TableRow key={section.id}>
+                    <TableCell>{section.sectionName}</TableCell>
+                    <TableCell>
+                      <Chip label={section.track} color="primary" size="small" />
+                    </TableCell>
+                    <TableCell>
+                      <Chip label={section.gradeLevel} color="secondary" size="small" />
+                    </TableCell>
+                    <TableCell>
+                      <Chip label={section.semester || 'N/A'} color="info" size="small" />
+                    </TableCell>
+                    <TableCell>
+                      {section.selectedSubjects?.map(subjectId => {
+                        const subject = subjects.find(s => s.id === subjectId);
+                        return subject ? (
+                          <Chip key={subjectId} label={subject.name} color="info" size="small" sx={{ mr: 0.5, mb: 0.5 }} />
+                        ) : null;
+                      }) || '-'}
+                    </TableCell>
+                    <TableCell>{section.maxStudents}</TableCell>
+                    <TableCell>
+                      <IconButton onClick={() => handleOpen(section)}>
+                        <EditIcon />
+                      </IconButton>
+                      <IconButton onClick={() => handleDelete(section.id)} color="error">
+                        <DeleteIcon />
+                      </IconButton>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </TableContainer>
@@ -341,6 +456,22 @@ const SectionManagement = () => {
                   {gradeLevels.map((level) => (
                     <MenuItem key={level} value={level}>
                       {level}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth required>
+                <InputLabel>Semester</InputLabel>
+                <Select
+                  value={formData.semester}
+                  onChange={handleChange('semester')}
+                  label="Semester"
+                >
+                  {semesters.map((semester) => (
+                    <MenuItem key={semester} value={semester}>
+                      {semester}
                     </MenuItem>
                   ))}
                 </Select>

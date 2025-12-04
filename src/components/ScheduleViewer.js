@@ -54,6 +54,7 @@ import { scheduleAPI, classroomAPI, teacherAPI } from '../services/api';
 import { sectionFirestoreAPI } from '../firebase/sectionFirestoreService';
 import { subjectAPI } from '../firebase/subjectService';
 import { useAuth } from '../contexts/AuthContext';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, getDocs, query, orderBy } from 'firebase/firestore';
 import firebaseConfig from '../firebase/config';
@@ -277,6 +278,8 @@ const TEMPLATE_DAY_LABELS = {
 
 const ScheduleViewer = () => {
   const { user, isAdmin, isTeacher } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   
   // Debug logging
   console.log('🔍 ScheduleViewer Debug:', {
@@ -363,6 +366,7 @@ const ScheduleViewer = () => {
 
   // Add/Delete states
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [selectedSemester, setSelectedSemester] = useState('');
   const [addFormData, setAddFormData] = useState({
     date: '',
     startTime: '',
@@ -373,7 +377,8 @@ const ScheduleViewer = () => {
     section: '',
     subject: '',
     notes: '',
-    isRecurring: false
+    isRecurring: false,
+    semester: ''
   });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [scheduleToDelete, setScheduleToDelete] = useState(null);
@@ -382,6 +387,35 @@ const ScheduleViewer = () => {
   const [draggedSchedule, setDraggedSchedule] = useState(null);
   const [dragOverSlot, setDragOverSlot] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
+
+  // Handle navigation state for pre-selecting semester
+  useEffect(() => {
+    if (location.state?.selectedSemester) {
+      setSelectedSemester(location.state.selectedSemester);
+      if (location.state.openAddDialog && isAdmin()) {
+        // Open add dialog after a short delay to ensure state is set
+        const timer = setTimeout(() => {
+          setAddFormData({
+            date: new Date().toISOString().split('T')[0],
+            startTime: '',
+            endTime: '',
+            dayOfWeek: '',
+            teacher: '',
+            classroom: '',
+            section: '',
+            subject: '',
+            notes: '',
+            isRecurring: false,
+            semester: ''
+          });
+          setAddDialogOpen(true);
+        }, 100);
+        // Clear the state to prevent reopening on re-render
+        navigate(location.pathname, { replace: true, state: {} });
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [location.state, isAdmin, navigate]);
 
   useEffect(() => {
     if (!gridSelectedSection && sections.length > 0) {
@@ -721,9 +755,45 @@ const ScheduleViewer = () => {
         return;
       }
 
+      // Validate required fields
+      if (!editFormData.teacher) {
+        setError('Please select a teacher');
+        setLoading(false);
+        return;
+      }
+      
       // Prepare update data
       const selectedTeacher = teachers.find(t => t.id === editFormData.teacher);
       const selectedClassroom = classrooms.find(c => c.id === editFormData.classroom);
+      
+      // Validate that teacher was found
+      if (!selectedTeacher) {
+        setError('Selected teacher not found. Please refresh and try again.');
+        setLoading(false);
+        return;
+      }
+      
+      // Get the section from the editing schedule
+      const sectionId = editingSchedule?.section?.id || editingSchedule?.section;
+      
+      // Validate teacher is assigned to section (strict assignment required)
+      if (sectionId) {
+        if (!selectedTeacher.assignedSections || selectedTeacher.assignedSections.length === 0) {
+          const sectionName = editingSchedule.section?.sectionName || editingSchedule.section?.name || 'this section';
+          setError(`This teacher is not assigned to any sections. Please assign the teacher to section ${sectionName} in Teacher Management first.`);
+          setLoading(false);
+          return;
+        }
+        
+        const sectionIdStr = String(sectionId);
+        const assignedSectionIds = selectedTeacher.assignedSections.map(id => String(id));
+        if (!assignedSectionIds.includes(sectionIdStr)) {
+          const sectionName = editingSchedule.section?.sectionName || editingSchedule.section?.name || 'this section';
+          setError(`This teacher is not assigned to section ${sectionName}. Please assign the teacher to this section in Teacher Management first.`);
+          setLoading(false);
+          return;
+        }
+      }
       
       const updateData = {
         startTime: editFormData.startTime,
@@ -789,8 +859,10 @@ const ScheduleViewer = () => {
       section: '',
       subject: '',
       notes: '',
-      isRecurring: false
+      isRecurring: false,
+      semester: ''
     });
+    setSelectedSemester('');
     setAddDialogOpen(true);
   };
 
@@ -798,12 +870,46 @@ const ScheduleViewer = () => {
   const handleAddFormChange = (field) => (event) => {
     const newValue = event.target.type === 'checkbox' ? event.target.checked : event.target.value;
     
-    // If section changes, reset subject to ensure it matches the new section's grade level
+    // If section changes, reset subject and check teacher assignment
     if (field === 'section') {
+      setAddFormData(prev => {
+        const newSectionId = newValue;
+        let newTeacher = prev.teacher;
+        
+        // Check if current teacher is assigned to the new section
+        if (prev.teacher) {
+          const currentTeacher = teachers.find(t => t.id === prev.teacher);
+          if (currentTeacher) {
+            // If teacher has no assigned sections, reset teacher (strict assignment required)
+            if (!currentTeacher.assignedSections || currentTeacher.assignedSections.length === 0) {
+              newTeacher = '';
+            } else {
+              // If teacher has assigned sections and doesn't include the new section, reset teacher
+              // Handle both string and number ID comparisons
+              const newSectionIdStr = String(newSectionId);
+              const assignedSectionIds = currentTeacher.assignedSections.map(id => String(id));
+              if (!assignedSectionIds.includes(newSectionIdStr)) {
+                newTeacher = '';
+              }
+            }
+          }
+        }
+        
+        return {
+          ...prev,
+          [field]: newValue,
+          subject: '', // Reset subject when section changes
+          teacher: newTeacher // Reset teacher if not assigned to new section
+        };
+      });
+    } else if (field === 'semester') {
+      // Handle semester change separately
+      setSelectedSemester(newValue);
       setAddFormData(prev => ({
         ...prev,
-        [field]: newValue,
-        subject: '' // Reset subject when section changes
+        section: '', // Reset section when semester changes
+        subject: '', // Reset subject when semester changes
+        teacher: '' // Reset teacher when semester changes
       }));
     } else {
       setAddFormData(prev => ({
@@ -836,10 +942,52 @@ const ScheduleViewer = () => {
         return;
       }
       
+      // Validate required fields
+      if (!addFormData.teacher) {
+        setError('Please select a teacher');
+        setLoading(false);
+        return;
+      }
+      
+      if (!addFormData.section) {
+        setError('Please select a section');
+        setLoading(false);
+        return;
+      }
+      
       // Prepare schedule data
       const selectedTeacher = teachers.find(t => t.id === addFormData.teacher);
       const selectedClassroom = classrooms.find(c => c.id === addFormData.classroom);
       const selectedSection = sections.find(s => s.id === addFormData.section);
+      
+      // Validate that teacher was found
+      if (!selectedTeacher) {
+        setError('Selected teacher not found. Please refresh and try again.');
+        setLoading(false);
+        return;
+      }
+      
+      // Validate that section was found
+      if (!selectedSection) {
+        setError('Selected section not found. Please refresh and try again.');
+        setLoading(false);
+        return;
+      }
+      
+      // Validate teacher is assigned to section (strict assignment required)
+      if (!selectedTeacher.assignedSections || selectedTeacher.assignedSections.length === 0) {
+        setError(`This teacher is not assigned to any sections. Please assign the teacher to section ${selectedSection.sectionName} in Teacher Management first.`);
+        setLoading(false);
+        return;
+      }
+      
+      const sectionIdStr = String(addFormData.section);
+      const assignedSectionIds = selectedTeacher.assignedSections.map(id => String(id));
+      if (!assignedSectionIds.includes(sectionIdStr)) {
+        setError(`This teacher is not assigned to section ${selectedSection.sectionName}. Please assign the teacher to this section in Teacher Management first.`);
+        setLoading(false);
+        return;
+      }
       
       const scheduleData = {
         date: addFormData.date,
@@ -852,8 +1000,16 @@ const ScheduleViewer = () => {
         subject: addFormData.subject,
         notes: addFormData.notes,
         isRecurring: addFormData.isRecurring,
+        semester: selectedSemester || selectedSection?.semester || '',
         status: 'scheduled'
       };
+      
+      // Validate semester is selected
+      if (!selectedSemester) {
+        setError('Please select a semester');
+        setLoading(false);
+        return;
+      }
 
       await scheduleAPI.create(scheduleData);
       
@@ -888,8 +1044,10 @@ const ScheduleViewer = () => {
       section: '',
       subject: '',
       notes: '',
-      isRecurring: false
+      isRecurring: false,
+      semester: ''
     });
+    setSelectedSemester('');
   };
 
   // Handle delete schedule
@@ -2115,6 +2273,19 @@ const ScheduleViewer = () => {
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
             <Grid item xs={12} sm={6}>
+              <FormControl fullWidth required>
+                <InputLabel>Semester</InputLabel>
+                <Select
+                  value={selectedSemester}
+                  label="Semester"
+                  onChange={handleAddFormChange('semester')}
+                >
+                  <MenuItem value="Semester 1">Semester 1</MenuItem>
+                  <MenuItem value="Semester 2">Semester 2</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6}>
               <TextField
                 fullWidth
                 label="Date"
@@ -2172,14 +2343,59 @@ const ScheduleViewer = () => {
                   value={addFormData.teacher}
                   label="Teacher"
                   onChange={handleAddFormChange('teacher')}
+                  disabled={!addFormData.section}
                 >
-                  {teachers.map((teacher) => (
-                    <MenuItem key={teacher.id} value={teacher.id}>
-                      {teacher.firstName} {teacher.lastName} ({teacher.subjects && teacher.subjects.length > 0 ? teacher.subjects.join(', ') : teacher.subject || 'N/A'})
-                    </MenuItem>
-                  ))}
+                  {(() => {
+                    // Filter teachers based on assigned sections
+                    // Only show teachers who are assigned to the selected section
+                    const filteredTeachers = addFormData.section 
+                      ? teachers.filter(teacher => {
+                          // If teacher has no assigned sections, don't show them (strict assignment required)
+                          if (!teacher.assignedSections || teacher.assignedSections.length === 0) {
+                            return false;
+                          }
+                          // Show teacher only if they're assigned to the selected section
+                          // Handle both string and number ID comparisons
+                          const sectionIdStr = String(addFormData.section);
+                          const assignedSectionIds = teacher.assignedSections.map(id => String(id));
+                          return assignedSectionIds.includes(sectionIdStr);
+                        })
+                      : [];
+                    
+                    if (filteredTeachers.length === 0) {
+                      return (
+                        <MenuItem disabled value="">
+                          No teachers available for this section
+                        </MenuItem>
+                      );
+                    }
+                    
+                    return filteredTeachers.map((teacher) => (
+                      <MenuItem key={teacher.id} value={teacher.id}>
+                        {teacher.firstName} {teacher.lastName} ({teacher.subjects && teacher.subjects.length > 0 ? teacher.subjects.join(', ') : teacher.subject || 'N/A'})
+                      </MenuItem>
+                    ));
+                  })()}
                 </Select>
               </FormControl>
+              {addFormData.section && (() => {
+                const filteredTeachers = teachers.filter(teacher => {
+                  // If teacher has no assigned sections, don't show them (strict assignment required)
+                  if (!teacher.assignedSections || teacher.assignedSections.length === 0) return false;
+                  // Handle both string and number ID comparisons
+                  const sectionIdStr = String(addFormData.section);
+                  const assignedSectionIds = teacher.assignedSections.map(id => String(id));
+                  return assignedSectionIds.includes(sectionIdStr);
+                });
+                if (filteredTeachers.length === 0) {
+                  return (
+                    <Typography variant="caption" color="warning.main" sx={{ mt: 0.5, display: 'block' }}>
+                      No teachers are assigned to this section. Please assign teachers to this section in Teacher Management.
+                    </Typography>
+                  );
+                }
+                return null;
+              })()}
             </Grid>
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth required>
@@ -2204,14 +2420,28 @@ const ScheduleViewer = () => {
                   value={addFormData.section}
                   label="Section"
                   onChange={handleAddFormChange('section')}
+                  disabled={!selectedSemester}
                 >
-                  {sections.map((section) => (
-                    <MenuItem key={section.id} value={section.id}>
-                      {section.sectionName}
+                  {selectedSemester ? (
+                    sections
+                      .filter(section => section.semester === selectedSemester)
+                      .map((section) => (
+                        <MenuItem key={section.id} value={section.id}>
+                          {section.sectionName} ({section.gradeLevel})
+                        </MenuItem>
+                      ))
+                  ) : (
+                    <MenuItem disabled value="">
+                      Please select a semester first
                     </MenuItem>
-                  ))}
+                  )}
                 </Select>
               </FormControl>
+              {selectedSemester && sections.filter(s => s.semester === selectedSemester).length === 0 && (
+                <Typography variant="caption" color="warning.main" sx={{ mt: 0.5, display: 'block' }}>
+                  No sections available for {selectedSemester}. Please add sections for this semester in Section Management.
+                </Typography>
+              )}
             </Grid>
             <Grid item xs={12} sm={6}>
               <FormControl fullWidth required>
@@ -2397,11 +2627,33 @@ const ScheduleViewer = () => {
                   label="Teacher"
                   onChange={handleEditFormChange('teacher')}
                 >
-                  {teachers.map((teacher) => (
-                    <MenuItem key={teacher.id} value={teacher.id}>
-                      {teacher.firstName} {teacher.lastName} ({teacher.subjects && teacher.subjects.length > 0 ? teacher.subjects.join(', ') : teacher.subject || 'N/A'})
-                    </MenuItem>
-                  ))}
+                  {(() => {
+                    // For edit, get the section from editingSchedule
+                    const sectionId = editingSchedule?.section?.id || editingSchedule?.section;
+                    
+                    // Filter teachers based on assigned sections
+                    // Only show teachers who are assigned to the section (strict assignment required)
+                    const filteredTeachers = sectionId
+                      ? teachers.filter(teacher => {
+                          // If teacher has no assigned sections, don't show them (strict assignment required)
+                          // Exception: show current teacher even if not assigned (for editing existing schedules)
+                          if (!teacher.assignedSections || teacher.assignedSections.length === 0) {
+                            return teacher.id === editFormData.teacher; // Allow current teacher to remain
+                          }
+                          // Show teacher if they're assigned to the section, or if it's the current teacher
+                          // Handle both string and number ID comparisons
+                          const sectionIdStr = String(sectionId);
+                          const assignedSectionIds = teacher.assignedSections.map(id => String(id));
+                          return assignedSectionIds.includes(sectionIdStr) || teacher.id === editFormData.teacher;
+                        })
+                      : [];
+                    
+                    return filteredTeachers.map((teacher) => (
+                      <MenuItem key={teacher.id} value={teacher.id}>
+                        {teacher.firstName} {teacher.lastName} ({teacher.subjects && teacher.subjects.length > 0 ? teacher.subjects.join(', ') : teacher.subject || 'N/A'})
+                      </MenuItem>
+                    ));
+                  })()}
                 </Select>
               </FormControl>
             </Grid>

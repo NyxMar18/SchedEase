@@ -24,6 +24,8 @@ import {
   Select,
   MenuItem,
   Collapse,
+  FormControl,
+  InputLabel,
 } from '@mui/material';
 import {
   AutoAwesome as AutoAwesomeIcon,
@@ -38,12 +40,13 @@ import {
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
 } from '@mui/icons-material';
+import { useLocation } from 'react-router-dom';
 import { sectionAPI } from '../firebase/sectionService';
 import { teacherAPI, classroomAPI, scheduleAPI } from '../services/api';
 import { subjectAPI } from '../firebase/subjectService';
 import { userAPI } from '../services/userService';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, query, orderBy } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, query, orderBy, doc, setDoc } from 'firebase/firestore';
 import firebaseConfig from '../firebase/config';
 
 // Initialize Firebase
@@ -51,7 +54,9 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 const AutoSchedule = () => {
+  const location = useLocation();
   const [sections, setSections] = useState([]);
+  const [filteredSections, setFilteredSections] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [users, setUsers] = useState([]);
   const [classrooms, setClassrooms] = useState([]);
@@ -60,6 +65,8 @@ const AutoSchedule = () => {
   const [failedSchedules, setFailedSchedules] = useState([]);
   const [schoolYears, setSchoolYears] = useState([]);
   const [selectedSchoolYear, setSelectedSchoolYear] = useState('');
+  const [selectedSemester, setSelectedSemester] = useState('');
+  const [activeSemester, setActiveSemester] = useState('');
   const [showSchoolYearDialog, setShowSchoolYearDialog] = useState(false);
   const [showDeleteSchoolYearDialog, setShowDeleteSchoolYearDialog] = useState(false);
   const [deleteSelectedSchoolYear, setDeleteSelectedSchoolYear] = useState('');
@@ -69,7 +76,6 @@ const AutoSchedule = () => {
   
   // Collapsible sections state
   const [expandedSections, setExpandedSections] = useState({
-    scheduleDistribution: true,
     scheduleSummary: true,
     generatedSchedule: true,
     scheduleSummary2: true,
@@ -171,20 +177,31 @@ const AutoSchedule = () => {
 
   const timeSlots = SESSION_TEMPLATE_SLOTS;
 
+  // Handle navigation state for pre-selecting semester
+  useEffect(() => {
+    if (location.state?.selectedSemester) {
+      setSelectedSemester(location.state.selectedSemester);
+    }
+  }, [location.state]);
+
+  // Filter sections by semester
+  useEffect(() => {
+    if (selectedSemester) {
+      const filtered = sections.filter(section => section.semester === selectedSemester);
+      setFilteredSections(filtered);
+    } else {
+      setFilteredSections(sections);
+    }
+  }, [sections, selectedSemester]);
+
   useEffect(() => {
     fetchData();
-    loadExistingSchedules();
+    // Removed loadExistingSchedules() to improve performance
+    fetchActiveSemester();
   }, []);
 
-  const loadExistingSchedules = async () => {
-    try {
-      const schedulesRes = await scheduleAPI.getAll();
-      setGeneratedSchedules(schedulesRes.data);
-    } catch (error) {
-      console.log('No existing schedules found or error loading:', error);
-      // This is expected if the collection doesn't exist yet
-    }
-  };
+  // Removed loadExistingSchedules function to improve performance
+  // Schedules are only loaded after generation
 
   const fetchData = async () => {
     try {
@@ -210,8 +227,23 @@ const AutoSchedule = () => {
   };
 
   const generateSchedule = async () => {
-    if (sections.length === 0) {
-      setError('Please add sections first');
+    // Semester is required
+    if (!selectedSemester) {
+      setError('Please select a semester first. Schedule generation requires a specific semester to be selected.');
+      return;
+    }
+    
+    // Check if selected semester matches active semester
+    if (activeSemester && selectedSemester !== activeSemester) {
+      setError(`Cannot generate schedules for ${selectedSemester}. Only the active semester (${activeSemester}) can be used for schedule generation. Please select ${activeSemester} or set it as active in settings.`);
+      return;
+    }
+    
+    // Use filtered sections for the selected semester
+    const sectionsToUse = filteredSections;
+    
+    if (sectionsToUse.length === 0) {
+      setError(`No sections available for ${selectedSemester}. Please add sections for this semester in Section Management.`);
       return;
     }
     
@@ -234,7 +266,7 @@ const AutoSchedule = () => {
     }
 
     // Check if sections have subjects selected
-    const sectionsWithoutSubjects = sections.filter(section => 
+    const sectionsWithoutSubjects = sectionsToUse.filter(section => 
       !section.selectedSubjects || section.selectedSubjects.length === 0
     );
     if (sectionsWithoutSubjects.length > 0) {
@@ -248,10 +280,11 @@ const AutoSchedule = () => {
 
       console.log('🚀 Starting schedule generation...');
       console.log('📊 Data summary:', {
-        sections: sections.length,
+        sections: sectionsToUse.length,
         teachers: teachers.length,
         classrooms: classrooms.length,
-        subjects: subjects.length
+        subjects: subjects.length,
+        semester: selectedSemester || 'All semesters'
       });
       console.log('📦 Classrooms data:', classrooms);
       console.log('📚 Subjects data:', subjects.map(s => ({ 
@@ -564,7 +597,94 @@ const AutoSchedule = () => {
       // Collect all scheduling requests first
       const schedulingRequests = [];
       
-      for (const section of sections) {
+      // Helper function to check if a section has any assigned teachers
+      const sectionHasAssignedTeachers = (section) => {
+        const teacherUsers = getTeacherUsers();
+        return teacherUsers.some(user => {
+          const teacherData = getTeacherDataForUser(user);
+          const assignedSectionIds = teacherData?.assignedSections || [];
+          if (assignedSectionIds.length === 0) return false;
+          const sectionIdStr = String(section.id);
+          const assignedIds = assignedSectionIds.map(id => String(id));
+          return assignedIds.includes(sectionIdStr);
+        });
+      };
+      
+      // Create a mapping to track teacher assignments: subjectId -> sectionId -> teacher
+      // This ensures the same teacher is used for the same subject across all assigned sections
+      const teacherAssignmentMap = new Map(); // Map<subjectId, Map<sectionId, teacher>>
+      
+      // First pass: Build teacher assignment map based on assigned sections
+      // Only for sections that have assigned teachers
+      for (const subject of subjects) {
+        const subjectSectionMap = new Map();
+        
+        // Find all sections that have this subject AND have assigned teachers
+        const sectionsWithSubject = sectionsToUse.filter(section => {
+          if (!section.selectedSubjects?.includes(subject.id)) return false;
+          return sectionHasAssignedTeachers(section);
+        });
+        
+        if (sectionsWithSubject.length === 0) continue;
+        
+        // Find teachers who can teach this subject AND are assigned to these sections
+        const teacherUsers = getTeacherUsers();
+        const availableTeachers = [];
+        
+        for (const user of teacherUsers) {
+          const teacherData = getTeacherDataForUser(user);
+          
+          // Check if teacher can teach this subject
+          let canTeachSubject = false;
+          if (teacherData?.subjects && Array.isArray(teacherData.subjects)) {
+            canTeachSubject = teacherData.subjects.includes(subject.name);
+          } else {
+            const userSubject = user.subject || teacherData?.subject;
+            canTeachSubject = userSubject === subject.name;
+          }
+          
+          if (!canTeachSubject) continue;
+          
+          // Check which sections this teacher is assigned to
+          const assignedSectionIds = teacherData?.assignedSections || [];
+          if (assignedSectionIds.length === 0) continue; // Skip teachers with no assigned sections
+          
+          // Find sections that this teacher is assigned to AND have this subject
+          const teacherAssignedSections = sectionsWithSubject.filter(section => {
+            const sectionIdStr = String(section.id);
+            const assignedIds = assignedSectionIds.map(id => String(id));
+            return assignedIds.includes(sectionIdStr);
+          });
+          
+          if (teacherAssignedSections.length > 0) {
+            availableTeachers.push({
+              user,
+              teacherData,
+              assignedSections: teacherAssignedSections
+            });
+          }
+        }
+        
+        // Assign teachers to sections: prioritize teachers assigned to multiple sections
+        // Sort by number of assigned sections (descending) to assign teachers with more sections first
+        availableTeachers.sort((a, b) => b.assignedSections.length - a.assignedSections.length);
+        
+        const assignedSectionsSet = new Set();
+        
+        for (const teacherInfo of availableTeachers) {
+          // Assign this teacher to all their assigned sections that haven't been assigned yet
+          for (const section of teacherInfo.assignedSections) {
+            if (!assignedSectionsSet.has(section.id)) {
+              subjectSectionMap.set(section.id, teacherInfo);
+              assignedSectionsSet.add(section.id);
+            }
+          }
+        }
+        
+        teacherAssignmentMap.set(subject.id, subjectSectionMap);
+      }
+      
+      for (const section of sectionsToUse) {
         console.log(`📝 Processing section: ${section.sectionName}`, {
           selectedSubjects: section.selectedSubjects,
           hasSelectedSubjects: !!section.selectedSubjects,
@@ -576,39 +696,166 @@ const AutoSchedule = () => {
         );
         
         console.log(`📚 Found ${sectionSubjects.length} subjects for section ${section.sectionName}`);
+        
+        // Check if this section has any assigned teachers
+        const hasAssignedTeachers = sectionHasAssignedTeachers(section);
+        console.log(`📌 Section ${section.sectionName} - Has assigned teachers: ${hasAssignedTeachers}`);
 
         for (const subject of sectionSubjects) {
-          console.log(`🔍 Looking for teacher for subject: ${subject.name}`);
-          const teacherUsers = getTeacherUsers();
-          const availableTeacherUsers = teacherUsers.filter(user => {
-            const teacherData = getTeacherDataForUser(user);
-            // Check if teacher has this subject in their subjects array (new format) or subject field (old format)
-            if (teacherData?.subjects && Array.isArray(teacherData.subjects)) {
-              return teacherData.subjects.includes(subject.name);
-            }
-            // Backward compatibility: check old single subject field
-            const userSubject = user.subject || teacherData?.subject;
-            return userSubject === subject.name;
-          });
+          console.log(`🔍 Looking for teacher for subject: ${subject.name} in section ${section.sectionName}`);
+          
+          let selectedTeacherInfo = null;
+          let useRandomization = false;
+          
+          if (hasAssignedTeachers) {
+            // Section has assigned teachers: Try strict assignment first
+            // Check if we already have a teacher assigned for this subject-section combination
+            const subjectMap = teacherAssignmentMap.get(subject.id);
+            selectedTeacherInfo = subjectMap?.get(section.id);
+            
+            if (!selectedTeacherInfo) {
+              // Find any teacher who can teach this subject and is assigned to this section
+              const teacherUsers = getTeacherUsers();
+              const availableTeacherUsers = teacherUsers.filter(user => {
+                const teacherData = getTeacherDataForUser(user);
+                
+                // Check if teacher can teach this subject
+                let canTeachSubject = false;
+                if (teacherData?.subjects && Array.isArray(teacherData.subjects)) {
+                  canTeachSubject = teacherData.subjects.includes(subject.name);
+                } else {
+                  const userSubject = user.subject || teacherData?.subject;
+                  canTeachSubject = userSubject === subject.name;
+                }
+                
+                if (!canTeachSubject) return false;
+                
+                // Check if teacher is assigned to this section
+                const assignedSectionIds = teacherData?.assignedSections || [];
+                if (assignedSectionIds.length === 0) return false; // Strict: must have assigned sections
+                
+                const sectionIdStr = String(section.id);
+                const assignedIds = assignedSectionIds.map(id => String(id));
+                return assignedIds.includes(sectionIdStr);
+              });
 
-          if (availableTeacherUsers.length === 0) {
-            console.log(`❌ No teacher users found for subject: ${subject.name}`);
-            // Track missing teacher
+              if (availableTeacherUsers.length === 0) {
+                // No assigned teacher can teach this subject - fall back to randomization
+                console.log(`⚠️ Section ${section.sectionName} has assigned teachers, but none can teach ${subject.name} - falling back to randomization`);
+                useRandomization = true;
+              } else {
+                // Select the least used teacher user for even distribution
+                const selectedUser = getLeastUsedTeacher(availableTeacherUsers);
+                const teacherData = getTeacherDataForUser(selectedUser);
+                selectedTeacherInfo = { user: selectedUser, teacherData };
+              }
+            }
+          } else {
+            // Section has NO assigned teachers: Use randomization
+            useRandomization = true;
+          }
+          
+          // Use randomization if no assigned teacher was found
+          if (useRandomization || !selectedTeacherInfo) {
+            // Use randomization (either section has no assigned teachers, or assigned teachers can't teach this subject)
+            console.log(`🔄 Using randomization for ${subject.name} in section ${section.sectionName}${hasAssignedTeachers ? ' (assigned teachers cannot teach this subject)' : ' (section has no assigned teachers)'}`);
+            const teacherUsers = getTeacherUsers();
+            console.log(`📊 Total teacher users available: ${teacherUsers.length}`);
+            
+            const availableTeacherUsers = teacherUsers.filter(user => {
+              const teacherData = getTeacherDataForUser(user);
+              
+              // Check if teacher can teach this subject (no section assignment check)
+              // Check both teacherData and user object for subjects
+              let canTeachSubject = false;
+              
+              // Check teacherData first (if it exists and is not the user itself)
+              if (teacherData && teacherData !== user) {
+                if (teacherData.subjects && Array.isArray(teacherData.subjects)) {
+                  canTeachSubject = teacherData.subjects.includes(subject.name);
+                } else if (teacherData.subject) {
+                  canTeachSubject = teacherData.subject === subject.name;
+                }
+              }
+              
+              // If not found in teacherData, check user object
+              if (!canTeachSubject) {
+                if (user.subjects && Array.isArray(user.subjects)) {
+                  canTeachSubject = user.subjects.includes(subject.name);
+                } else if (user.subject) {
+                  canTeachSubject = user.subject === subject.name;
+                }
+              }
+              
+              // Also check teacherData if it's the same as user (when teacherData is user)
+              if (!canTeachSubject && teacherData === user) {
+                if (teacherData.subjects && Array.isArray(teacherData.subjects)) {
+                  canTeachSubject = teacherData.subjects.includes(subject.name);
+                } else if (teacherData.subject) {
+                  canTeachSubject = teacherData.subject === subject.name;
+                }
+              }
+              
+              if (canTeachSubject) {
+                console.log(`  ✓ Teacher can teach ${subject.name}: ${user.name || user.firstName + ' ' + user.lastName}`);
+              }
+              
+              return canTeachSubject;
+            });
+
+            console.log(`📊 Available teachers for ${subject.name} (randomization): ${availableTeacherUsers.length}`);
+
+            if (availableTeacherUsers.length === 0) {
+              console.log(`❌ No teacher users found for subject: ${subject.name} (section ${section.sectionName} has no assigned teachers)`);
+              console.log(`   Debug: Total teachers: ${teacherUsers.length}, Subject: ${subject.name}`);
+              // Track missing teacher
+              failedSchedulesList.push({
+                section: section.sectionName,
+                subject: subject.name,
+                reason: 'No teacher available',
+                details: `No teacher found for subject: ${subject.name}. Section ${section.sectionName} has no assigned teachers, so any teacher who can teach ${subject.name} would be used.`,
+                type: 'missing_teacher',
+                resolution: 'Add a teacher who can teach this subject or assign an existing teacher to this section in Teacher Management'
+              });
+              continue;
+            }
+
+            // Select the least used teacher user for even distribution (randomization)
+            const selectedUser = getLeastUsedTeacher(availableTeacherUsers);
+            if (!selectedUser) {
+              console.error(`❌ getLeastUsedTeacher returned null/undefined`);
+              failedSchedulesList.push({
+                section: section.sectionName,
+                subject: subject.name,
+                reason: 'Teacher selection failed',
+                details: `Failed to select a teacher from ${availableTeacherUsers.length} available teachers`,
+                type: 'selection_error',
+                resolution: 'Please check teacher data and try again'
+              });
+              continue;
+            }
+            
+            const teacherData = getTeacherDataForUser(selectedUser) || selectedUser; // Fallback to user if teacherData is null
+            selectedTeacherInfo = { user: selectedUser, teacherData };
+            console.log(`✅ Selected teacher via randomization: ${selectedUser.name || selectedUser.firstName + ' ' + selectedUser.lastName} (ID: ${selectedUser.id}) for ${subject.name} in ${section.sectionName}`);
+          }
+          
+          if (!selectedTeacherInfo) {
+            console.error(`❌ CRITICAL: selectedTeacherInfo is null for ${subject.name} in ${section.sectionName}`);
             failedSchedulesList.push({
               section: section.sectionName,
               subject: subject.name,
-              reason: 'No teacher available',
-              details: `No teacher found for subject: ${subject.name}`,
-              type: 'missing_teacher',
-              resolution: 'Add a teacher who can teach this subject or assign an existing teacher to this subject'
+              reason: 'Teacher selection failed',
+              details: `Failed to select a teacher for ${subject.name} in section ${section.sectionName}`,
+              type: 'selection_error',
+              resolution: 'Please check teacher assignments and try again'
             });
             continue;
           }
-
-          // Select the least used teacher user for even distribution
-          const selectedUser = getLeastUsedTeacher(availableTeacherUsers);
-          const teacherData = getTeacherDataForUser(selectedUser);
-          console.log(`👨‍🏫 Selected least used teacher for ${subject.name}: ${selectedUser.name || selectedUser.firstName + ' ' + selectedUser.lastName} (current load: ${teacherUsage[selectedUser.id] || 0})`);
+          
+          const selectedUser = selectedTeacherInfo.user;
+          const teacherData = selectedTeacherInfo.teacherData || selectedUser; // Fallback to user if teacherData is null
+          console.log(`👨‍🏫 Selected teacher for ${subject.name} in ${section.sectionName}: ${selectedUser.name || selectedUser.firstName + ' ' + selectedUser.lastName} (current load: ${teacherUsage[selectedUser.id] || 0})${hasAssignedTeachers ? ' [Assigned]' : ' [Randomized]'}`);
 
           // Handle backward compatibility: get required room types with durations
           let roomTypeConfigs = [];
@@ -705,11 +952,26 @@ const AutoSchedule = () => {
             const availableDays = allAvailableDays; // Will be reduced to 1 day per session during scheduling
             
             console.log(`✅ Creating session ${sessionIndex + 1}/${numberOfSessions} (${sessionDuration}h) for ${section.sectionName} - ${subject.name} in ${requiredRoomType}`);
+            console.log(`   Teacher: ${selectedUser.name || selectedUser.firstName + ' ' + selectedUser.lastName}, Classroom: ${selectedClassroom.roomName}`);
           
+            const requestTeacher = teacherData || selectedUser;
+            if (!requestTeacher) {
+              console.error(`❌ CRITICAL: requestTeacher is null for session ${sessionIndex + 1} of ${subject.name} in ${section.sectionName}`);
+              failedSchedulesList.push({
+                section: section.sectionName,
+                subject: subject.name,
+                reason: 'Teacher data missing',
+                details: `Teacher data is missing for session ${sessionIndex + 1}`,
+                type: 'data_error',
+                resolution: 'Please check teacher data and try again'
+              });
+              continue;
+            }
+            
             schedulingRequests.push({
               section,
               subject,
-              teacher: teacherData || selectedUser,
+              teacher: requestTeacher,
               teacherUser: selectedUser,
               classroom: selectedClassroom,
               durationIndex: sessionIndex,
@@ -721,6 +983,7 @@ const AutoSchedule = () => {
               suitableClassrooms,
               requiredRoomType: requiredRoomType // Store which room type this request is for
             });
+            console.log(`   ✓ Scheduling request created successfully (total requests: ${schedulingRequests.length})`);
           }
         }
       }
@@ -953,6 +1216,7 @@ const AutoSchedule = () => {
                           totalSessions: request.totalSessions,
                           durationIndex: slotIndex,
                           schoolYearId: selectedSchoolYear,
+                          semester: selectedSemester,
                           notes: `Auto-generated schedule for ${request.section.sectionName} - ${request.subject.name} (Session ${request.sessionNumber}/${request.totalSessions}, Slot ${slotIndex + 1}/${individualSlots.length})`,
                           isRecurring: true,
                           status: 'scheduled'
@@ -1102,8 +1366,8 @@ const AutoSchedule = () => {
         failedToSave: failedCount
       });
       
-      // Reload existing schedules after generation to ensure conflict checking works on subsequent runs
-      await loadExistingSchedules();
+      // Removed loadExistingSchedules() call to improve performance
+      // Schedules are saved to database and will be available on next page load
     } catch (err) {
       console.error('Schedule generation error:', err);
       setError(`Failed to generate schedule: ${err.message || err.toString()}`);
@@ -1196,6 +1460,21 @@ const AutoSchedule = () => {
     }
   };
 
+  // Fetch active semester from settings
+  const fetchActiveSemester = async () => {
+    try {
+      const settingsRef = collection(db, 'settings');
+      const querySnapshot = await getDocs(settingsRef);
+      const activeSemesterDoc = querySnapshot.docs.find(doc => doc.id === 'activeSemester');
+      if (activeSemesterDoc) {
+        const data = activeSemesterDoc.data();
+        setActiveSemester(data.semester || '');
+      }
+    } catch (err) {
+      console.error('Failed to fetch active semester:', err);
+    }
+  };
+
   // School Year Management functions using Firebase
   const fetchSchoolYearsFromStorage = async () => {
     try {
@@ -1245,8 +1524,13 @@ const AutoSchedule = () => {
                 <Typography variant="h6">Sections</Typography>
               </Box>
               <Typography variant="h4" color="primary">
-                {sections.length}
+                {selectedSemester ? filteredSections.length : sections.length}
               </Typography>
+              {selectedSemester && (
+                <Typography variant="caption" color="textSecondary">
+                  ({filteredSections.length} for {selectedSemester})
+                </Typography>
+              )}
             </CardContent>
           </Card>
         </Grid>
@@ -1291,54 +1575,64 @@ const AutoSchedule = () => {
         </Grid>
       </Grid>
 
-      {/* Schedule Pattern Breakdown */}
-      <Card sx={{ mb: 3, bgcolor: 'info.light', color: 'white' }}>
+      {/* Semester Selection */}
+      <Card sx={{ mb: 3, border: selectedSemester ? '2px solid' : '1px solid', borderColor: selectedSemester ? (selectedSemester === activeSemester ? 'success.main' : 'warning.main') : 'divider' }}>
         <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => toggleSection('scheduleDistribution')}>
-            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', mb: 0 }}>
-              📅 Schedule Pattern Distribution
-            </Typography>
-            {expandedSections.scheduleDistribution ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-          </Box>
-        </CardContent>
-        <Collapse in={expandedSections.scheduleDistribution}>
-          <CardContent sx={{ pt: 0 }}>
-          <Grid container spacing={2}>
-            {schedulePatterns.map(pattern => {
-              // Count subjects (all use DAILY pattern now)
-              const subjectCount = pattern.value === 'DAILY' ? subjects.length : 0;
-              const totalDays = pattern.days.length;
-              
-              return (
-                <Grid item xs={12} sm={4} key={pattern.value}>
-                  <Box sx={{ 
-                    p: 2, 
-                    borderRadius: 2, 
-                    bgcolor: 'rgba(255,255,255,0.1)',
-                    textAlign: 'center'
-                  }}>
-                    <Typography variant="h4" sx={{ fontWeight: 'bold', mb: 1 }}>
-                      {subjectCount}
-                    </Typography>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
-                      {pattern.label}
-                    </Typography>
-                    <Typography variant="body2" sx={{ opacity: 0.9 }}>
-                      {totalDays} days per week
-                    </Typography>
-                    <Typography variant="caption" sx={{ opacity: 0.8 }}>
-                      {pattern.days.join(', ')}
-                    </Typography>
-                  </Box>
-                </Grid>
-              );
-            })}
-          </Grid>
-          <Typography variant="body2" sx={{ mt: 2, opacity: 0.9 }}>
-            💡 All schedules are distributed across all weekdays (Monday-Friday).
+          <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <ScheduleIcon color="primary" />
+            Semester Selection (Required)
           </Typography>
-          </CardContent>
-        </Collapse>
+          {activeSemester && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              <strong>Active Semester:</strong> {activeSemester} - Only schedules for the active semester can be generated.
+            </Alert>
+          )}
+          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+            <strong>Select which semester to generate schedules for.</strong> Only sections belonging to the selected semester will be scheduled. 
+            {activeSemester && <strong> You can only generate schedules for the active semester ({activeSemester}).</strong>}
+          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+            <FormControl sx={{ minWidth: 200 }} required>
+              <InputLabel>Semester *</InputLabel>
+              <Select
+                value={selectedSemester}
+                onChange={(e) => setSelectedSemester(e.target.value)}
+                label="Semester *"
+                error={!selectedSemester}
+              >
+                <MenuItem value="Semester 1" disabled={activeSemester && activeSemester !== 'Semester 1'}>
+                  Semester 1 {activeSemester === 'Semester 1' && '✓ Active'}
+                </MenuItem>
+                <MenuItem value="Semester 2" disabled={activeSemester && activeSemester !== 'Semester 2'}>
+                  Semester 2 {activeSemester === 'Semester 2' && '✓ Active'}
+                </MenuItem>
+              </Select>
+            </FormControl>
+            {selectedSemester && (
+              <Chip 
+                label={`${filteredSections.length} section${filteredSections.length !== 1 ? 's' : ''} available for ${selectedSemester}`} 
+                color={selectedSemester === activeSemester ? 'success' : 'warning'} 
+                variant="filled"
+                sx={{ fontWeight: 'bold' }}
+              />
+            )}
+            {selectedSemester && selectedSemester !== activeSemester && activeSemester && (
+              <Alert severity="error" sx={{ flex: 1 }}>
+                Cannot generate schedules for {selectedSemester}. Only {activeSemester} is active.
+              </Alert>
+            )}
+            {!selectedSemester && (
+              <Alert severity="warning" sx={{ flex: 1 }}>
+                Please select a semester to proceed with schedule generation.
+              </Alert>
+            )}
+          </Box>
+          {selectedSemester && filteredSections.length === 0 && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              No sections found for {selectedSemester}. Please add sections with this semester in Section Management.
+            </Alert>
+          )}
+        </CardContent>
       </Card>
 
       {/* School Year Selection */}
@@ -1384,7 +1678,7 @@ const AutoSchedule = () => {
           size="large"
           startIcon={<AutoAwesomeIcon />}
           onClick={generateSchedule}
-          disabled={loading || sections.length === 0 || getTeacherUsers().length === 0 || classrooms.length === 0 || subjects.length === 0}
+          disabled={loading || !selectedSemester || filteredSections.length === 0 || getTeacherUsers().length === 0 || classrooms.length === 0 || subjects.length === 0}
         >
           Generate Schedule
         </Button>
@@ -1433,8 +1727,8 @@ const AutoSchedule = () => {
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
 
-      {/* Enhanced Schedule Distribution Dashboard */}
-      {generatedSchedules.length > 0 && (
+      {/* Removed generated schedule display sections to improve performance */}
+      {false && generatedSchedules.length > 0 && (
         <Card sx={{ mb: 3, borderRadius: 3, boxShadow: 3 }}>
           <CardContent sx={{ p: 3 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
@@ -1650,8 +1944,8 @@ const AutoSchedule = () => {
         </Card>
       )}
 
-      {/* Schedule Summary */}
-      {generatedSchedules.length > 0 && (
+      {/* Removed Schedule Summary section to improve performance */}
+      {false && generatedSchedules.length > 0 && (
         <Card sx={{ mb: 3 }}>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => toggleSection('scheduleSummary')}>
@@ -1667,7 +1961,7 @@ const AutoSchedule = () => {
             <Grid container spacing={2}>
               <Grid item xs={12} md={6}>
                 <Typography variant="subtitle2" gutterBottom>Hours per Section:</Typography>
-                {sections.map(section => {
+                {(selectedSemester ? filteredSections : sections).map(section => {
                   const sectionSchedules = generatedSchedules.filter(s => 
                     s.section.sectionName === section.sectionName || s.section === section.sectionName
                   );
@@ -1711,8 +2005,8 @@ const AutoSchedule = () => {
         </Card>
       )}
 
-      {/* Generated Schedule Table */}
-      {generatedSchedules.length > 0 && (
+      {/* Removed Generated Schedule Table section to improve performance */}
+      {false && generatedSchedules.length > 0 && (
         <Card>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => toggleSection('generatedSchedule')}>
@@ -1786,8 +2080,8 @@ const AutoSchedule = () => {
         </Card>
       )}
 
-      {/* Schedule Summary */}
-      {generatedSchedules.length > 0 && (
+      {/* Removed Schedule Summary 2 section to improve performance */}
+      {false && generatedSchedules.length > 0 && (
         <Card sx={{ mb: 3, bgcolor: 'success.light', color: 'white' }}>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => toggleSection('scheduleSummary2')}>
@@ -1839,8 +2133,8 @@ const AutoSchedule = () => {
         </Card>
       )}
 
-      {/* Classroom Utilization */}
-      {generatedSchedules.length > 0 && (
+      {/* Removed Classroom Utilization section to improve performance */}
+      {false && generatedSchedules.length > 0 && (
         <Card sx={{ mb: 3 }}>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => toggleSection('classroomUtilization')}>
@@ -1902,8 +2196,8 @@ const AutoSchedule = () => {
         </Card>
       )}
 
-      {/* Teacher Distribution */}
-      {generatedSchedules.length > 0 && (
+      {/* Removed Teacher Distribution section to improve performance */}
+      {false && generatedSchedules.length > 0 && (
         <Card sx={{ mb: 3 }}>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => toggleSection('teacherWorkload')}>

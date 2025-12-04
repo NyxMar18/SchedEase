@@ -36,11 +36,13 @@ import {
 } from '@mui/icons-material';
 import { teacherAPI } from '../services/api';
 import { subjectAPI } from '../firebase/subjectService';
+import { sectionAPI } from '../firebase/sectionService';
 import { userAPI } from '../services/userService';
 
 const TeacherManagement = () => {
   const [teachers, setTeachers] = useState([]);
   const [subjects, setSubjects] = useState([]);
+  const [sections, setSections] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -52,6 +54,7 @@ const TeacherManagement = () => {
     lastName: '',
     email: '',
     subjects: [],
+    assignedSections: [],
     availableStartTime: '',
     availableEndTime: '',
     availableDays: [],
@@ -67,12 +70,14 @@ const TeacherManagement = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [teachersRes, subjectsRes] = await Promise.all([
+      const [teachersRes, subjectsRes, sectionsRes] = await Promise.all([
         teacherAPI.getAll(),
-        subjectAPI.getAll()
+        subjectAPI.getAll(),
+        sectionAPI.getAll()
       ]);
       setTeachers(teachersRes.data);
       setSubjects(subjectsRes.data);
+      setSections(sectionsRes.data);
       setError(null);
     } catch (err) {
       setError('Failed to fetch data');
@@ -89,6 +94,7 @@ const TeacherManagement = () => {
         lastName: teacher.lastName,
         email: teacher.email,
         subjects: teacher.subjects || [],
+        assignedSections: teacher.assignedSections || [],
         availableStartTime: teacher.availableStartTime || '',
         availableEndTime: teacher.availableEndTime || '',
         availableDays: teacher.availableDays || [],
@@ -101,6 +107,7 @@ const TeacherManagement = () => {
         lastName: '',
         email: '',
         subjects: [],
+        assignedSections: [],
         availableStartTime: '',
         availableEndTime: '',
         availableDays: [],
@@ -118,6 +125,7 @@ const TeacherManagement = () => {
       lastName: '',
       email: '',
       subjects: [],
+      assignedSections: [],
       availableStartTime: '',
       availableEndTime: '',
       availableDays: [],
@@ -251,6 +259,7 @@ const TeacherManagement = () => {
                   <TableCell>Name</TableCell>
                   <TableCell>Email</TableCell>
                   <TableCell>Subjects</TableCell>
+                  <TableCell>Assigned Sections</TableCell>
                   <TableCell>Available Days</TableCell>
                   <TableCell>Available Time</TableCell>
                   <TableCell>Actions</TableCell>
@@ -268,6 +277,24 @@ const TeacherManagement = () => {
                         ))
                       ) : (
                         <Chip label={teacher.subject || 'N/A'} color="secondary" size="small" />
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {teacher.assignedSections && teacher.assignedSections.length > 0 ? (
+                        teacher.assignedSections.map(sectionId => {
+                          const section = sections.find(s => s.id === sectionId);
+                          return section ? (
+                            <Chip 
+                              key={sectionId} 
+                              label={`${section.sectionName}${section.semester ? ` (${section.semester})` : ''}`} 
+                              color="primary" 
+                              size="small" 
+                              sx={{ mr: 0.5, mb: 0.5 }} 
+                            />
+                          ) : null;
+                        })
+                      ) : (
+                        <Typography variant="body2" color="textSecondary">None</Typography>
                       )}
                     </TableCell>
                     <TableCell>
@@ -358,6 +385,43 @@ const TeacherManagement = () => {
                     Please select at least one subject
                   </Typography>
                 )}
+              </Grid>
+              <Grid item xs={12}>
+                <FormControl fullWidth>
+                  <InputLabel>Assigned Sections</InputLabel>
+                  <Select
+                    multiple
+                    value={formData.assignedSections}
+                    onChange={handleChange('assignedSections')}
+                    label="Assigned Sections"
+                    renderValue={(selected) => (
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                        {selected.map((sectionId) => {
+                          const section = sections.find(s => s.id === sectionId);
+                          return section ? (
+                            <Chip 
+                              key={sectionId} 
+                              label={`${section.sectionName}${section.semester ? ` (${section.semester})` : ''}`} 
+                              size="small" 
+                            />
+                          ) : null;
+                        })}
+                      </Box>
+                    )}
+                  >
+                    {sections.map((section) => (
+                      <MenuItem 
+                        key={section.id} 
+                        value={section.id}
+                      >
+                        {section.sectionName} {section.gradeLevel && `(${section.gradeLevel})`} {section.semester && `- ${section.semester}`}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <Typography variant="caption" color="textSecondary" sx={{ mt: 0.5, display: 'block' }}>
+                  Select which sections this teacher will be assigned to. This helps filter available teachers when creating schedules.
+                </Typography>
               </Grid>
               <Grid item xs={12} sm={6}>
                 <TextField
