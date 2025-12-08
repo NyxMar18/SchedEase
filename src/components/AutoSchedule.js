@@ -547,6 +547,80 @@ const AutoSchedule = () => {
         return teacherUsageList[0]?.teacher;
       };
       
+      // Helper function to find alternative teachers who can teach the same subject and section
+      const findAlternativeTeachers = (subject, section, currentTeacherId, sectionAvailableDays) => {
+        const teacherUsers = getTeacherUsers();
+        const alternatives = [];
+        
+        // Check if section has assigned teachers by looking at all teachers
+        let sectionHasAssignedTeachers = false;
+        for (const user of teacherUsers) {
+          const teacherData = getTeacherDataForUser(user);
+          const assignedSectionIds = teacherData?.assignedSections || [];
+          if (assignedSectionIds.length > 0) {
+            const sectionIdStr = String(section.id);
+            const assignedIds = assignedSectionIds.map(id => String(id));
+            if (assignedIds.includes(sectionIdStr)) {
+              sectionHasAssignedTeachers = true;
+              break;
+            }
+          }
+        }
+        
+        for (const user of teacherUsers) {
+          // Skip the current teacher
+          const userId = user.id;
+          if (String(userId) === String(currentTeacherId)) continue;
+          
+          const teacherData = getTeacherDataForUser(user);
+          
+          // Check if teacher can teach this subject
+          let canTeachSubject = false;
+          if (teacherData?.subjects && Array.isArray(teacherData.subjects)) {
+            canTeachSubject = teacherData.subjects.includes(subject.name);
+          } else {
+            const userSubject = user.subject || teacherData?.subject;
+            canTeachSubject = userSubject === subject.name;
+          }
+          
+          if (!canTeachSubject) continue;
+          
+          // Check section assignment: if section has assigned teachers, only consider assigned teachers
+          // If section has no assigned teachers, consider any teacher who can teach the subject
+          if (sectionHasAssignedTeachers) {
+            const sectionIdStr = String(section.id);
+            const assignedSectionIds = teacherData?.assignedSections || [];
+            if (assignedSectionIds.length === 0) continue; // Section has assigned teachers, but this teacher isn't assigned
+            const assignedIds = assignedSectionIds.map(id => String(id));
+            if (!assignedIds.includes(sectionIdStr)) continue; // This teacher is not assigned to this section
+          }
+          // If section has no assigned teachers, any teacher who can teach the subject is eligible
+          
+          // Check if teacher is available on at least one of the available days
+          const teacher = teacherData || user;
+          if (!teacher?.availableDays || !Array.isArray(teacher.availableDays)) {
+            continue;
+          }
+          
+          const isAvailableOnDays = sectionAvailableDays.some(day => teacher.availableDays.includes(day));
+          if (!isAvailableOnDays) continue;
+          
+          // Check if teacher has valid time window
+          if (!teacher.availableStartTime || !teacher.availableEndTime) continue;
+          
+          alternatives.push({ user, teacherData: teacher });
+        }
+        
+        // Sort by usage (least used first)
+        alternatives.sort((a, b) => {
+          const countA = teacherUsage[a.user.id] || 0;
+          const countB = teacherUsage[b.user.id] || 0;
+          return countA - countB;
+        });
+        
+        return alternatives;
+      };
+      
       
       const findBestAvailableClassroom = (suitableClassrooms, day, timeSlot, teacher, usedSlots, section, preferredClassroomId = null) => {
         const teacherId = teacher?.id || teacher?.teacherId || teacher?.teacherUser?.id;
@@ -1097,21 +1171,30 @@ const AutoSchedule = () => {
         
           // Get available time slots for this teacher - utilize ALL time slots within teacher's availability window
           // Filter for 1.5 hour slots that don't span breaks and fall within teacher's time window
-          const availableTimeSlots = timeSlots.filter(slot => {
-            const teacherStartTime = request.teacher.availableStartTime;
-            const teacherEndTime = request.teacher.availableEndTime;
-            // Calculate slot duration
-            const startTime = new Date(`2000-01-01 ${slot.start}`);
-            const endTime = new Date(`2000-01-01 ${slot.end}`);
-            const durationMinutes = (endTime - startTime) / (1000 * 60);
-            // Only use 1.5 hour (90 minute) slots that don't span across breaks
-            const is90Minutes = durationMinutes === 90;
-            const doesNotSpanBreaks = !spansAcrossBreak(slot.start, slot.end);
-            const doesNotOverlapBreaks = !overlapsWithBreak(slot.start, slot.end);
-            // Ensure slot is fully within teacher's availability window (utilize full time range)
-            const slotWithinTeacherWindow = teacherStartTime <= slot.start && teacherEndTime >= slot.end;
-            return slotWithinTeacherWindow && is90Minutes && doesNotSpanBreaks && doesNotOverlapBreaks;
-          });
+          // This function will be called with the current teacher (which may change if alternatives are found)
+          const getAvailableTimeSlotsForTeacher = (teacher) => {
+            if (!teacher || !teacher.availableStartTime || !teacher.availableEndTime) {
+              return [];
+            }
+            return timeSlots.filter(slot => {
+              const teacherStartTime = teacher.availableStartTime;
+              const teacherEndTime = teacher.availableEndTime;
+              // Calculate slot duration
+              const startTime = new Date(`2000-01-01 ${slot.start}`);
+              const endTime = new Date(`2000-01-01 ${slot.end}`);
+              const durationMinutes = (endTime - startTime) / (1000 * 60);
+              // Only use 1.5 hour (90 minute) slots that don't span across breaks
+              const is90Minutes = durationMinutes === 90;
+              const doesNotSpanBreaks = !spansAcrossBreak(slot.start, slot.end);
+              const doesNotOverlapBreaks = !overlapsWithBreak(slot.start, slot.end);
+              // Ensure slot is fully within teacher's availability window (utilize full time range)
+              const slotWithinTeacherWindow = teacherStartTime <= slot.start && teacherEndTime >= slot.end;
+              return slotWithinTeacherWindow && is90Minutes && doesNotSpanBreaks && doesNotOverlapBreaks;
+            });
+          };
+          
+          // Get initial available time slots for the current teacher
+          let availableTimeSlots = getAvailableTimeSlotsForTeacher(request.teacher);
           
           const teacherName = request.teacher?.name || request.teacher?.firstName + ' ' + request.teacher?.lastName || 'Unknown';
           const teacherAvailableDays = request.teacher?.availableDays || [];
@@ -1121,6 +1204,14 @@ const AutoSchedule = () => {
             suitableTimeSlots: availableTimeSlots.length,
             timeSlotDetails: availableTimeSlots.map(s => `${s.start}-${s.end}`).join(', ')
           });
+          
+          // Helper to update available time slots when teacher changes
+          const updateAvailableTimeSlots = () => {
+            availableTimeSlots = getAvailableTimeSlotsForTeacher(request.teacher);
+            if (availableTimeSlots.length > 0) {
+              console.log(`   📊 Updated available time slots for new teacher: ${availableTimeSlots.length} slots`);
+            }
+          };
 
           // Get days already used for this subject's other sessions
           const subjectKey = `${request.subject.id || request.subject.name}-${request.section.id || request.section.sectionName}`;
@@ -1259,11 +1350,66 @@ const AutoSchedule = () => {
               );
               
               if (overallConflict.conflict) {
-                // Skip this time slot due to conflict
+                // Try to find an alternative teacher who can teach this subject and section
                 const teacherName = request.teacher?.name || request.teacher?.firstName + ' ' + request.teacher?.lastName || 'Unknown';
-                console.log(`     ⚠️ Overall conflict detected for ${request.subject.name} (Teacher: ${teacherName}, ID: ${request.teacher?.id || request.teacherUser?.id}) on ${day} at ${timeSlot.start}-${timeSlot.end}: ${overallConflict.reason} - ${overallConflict.details}`);
-                slotTriedOnAllDays = (day === sortedAvailableDays[sortedAvailableDays.length - 1]);
-                continue;
+                const currentTeacherId = request.teacher?.id || request.teacherUser?.id;
+                console.log(`     ⚠️ Overall conflict detected for ${request.subject.name} (Teacher: ${teacherName}, ID: ${currentTeacherId}) on ${day} at ${timeSlot.start}-${timeSlot.end}: ${overallConflict.reason} - ${overallConflict.details}`);
+                console.log(`     🔄 Attempting to find alternative teacher for ${request.subject.name} in section ${request.section.sectionName}...`);
+                
+                // Find alternative teachers
+                const alternativeTeachers = findAlternativeTeachers(
+                  request.subject,
+                  request.section,
+                  currentTeacherId,
+                  sortedAvailableDays
+                );
+                
+                let alternativeFound = false;
+                if (alternativeTeachers.length > 0) {
+                  // Try each alternative teacher
+                  for (const altTeacher of alternativeTeachers) {
+                    const altTeacherData = altTeacher.teacherData || altTeacher.user;
+                    const altTeacherId = altTeacher.user.id;
+                    
+                    // Check if this alternative teacher is available on this day
+                    if (!altTeacherData.availableDays || !altTeacherData.availableDays.includes(day)) {
+                      continue;
+                    }
+                    
+                    // Check if the time slot is within alternative teacher's availability window
+                    if (altTeacherData.availableStartTime > timeSlot.start || altTeacherData.availableEndTime < timeSlot.end) {
+                      continue;
+                    }
+                    
+                    // Check for conflicts with the alternative teacher
+                    const altConflict = hasConflict(
+                      day,
+                      timeSlot.start,
+                      timeSlot.end,
+                      altTeacherData,
+                      availableClassroom,
+                      request.section
+                    );
+                    
+                    if (!altConflict.conflict) {
+                      // Alternative teacher is available! Update the request
+                      console.log(`     ✅ Found alternative teacher: ${altTeacher.user.name || altTeacher.user.firstName + ' ' + altTeacher.user.lastName} (ID: ${altTeacherId})`);
+                      request.teacher = altTeacherData;
+                      request.teacherUser = altTeacher.user;
+                      // Update available time slots for the new teacher
+                      updateAvailableTimeSlots();
+                      alternativeFound = true;
+                      break;
+                    }
+                  }
+                }
+                
+                if (!alternativeFound) {
+                  // No alternative teacher found, skip this time slot
+                  console.log(`     ❌ No alternative teacher available for ${request.subject.name} in section ${request.section.sectionName} on ${day} at ${timeSlot.start}-${timeSlot.end}`);
+                  slotTriedOnAllDays = (day === sortedAvailableDays[sortedAvailableDays.length - 1]);
+                  continue;
+                }
               }
                   
                   // Check exact slot match
@@ -1315,8 +1461,57 @@ const AutoSchedule = () => {
                       
                       if (slotConflict.conflict) {
                         console.log(`   🔴 Slot conflict at ${slotStartTime}-${slotEndTime}: ${slotConflict.reason} - ${slotConflict.details}`);
-                        allSlotsAvailable = false;
-                        break;
+                        
+                        // Try to find an alternative teacher for this slot
+                        const currentTeacherId = request.teacher?.id || request.teacherUser?.id;
+                        const alternativeTeachers = findAlternativeTeachers(
+                          request.subject,
+                          request.section,
+                          currentTeacherId,
+                          sortedAvailableDays
+                        );
+                        
+                        let alternativeFound = false;
+                        if (alternativeTeachers.length > 0) {
+                          for (const altTeacher of alternativeTeachers) {
+                            const altTeacherData = altTeacher.teacherData || altTeacher.user;
+                            
+                            // Check if alternative teacher is available on this day and time
+                            if (!altTeacherData.availableDays || !altTeacherData.availableDays.includes(day)) {
+                              continue;
+                            }
+                            
+                            if (altTeacherData.availableStartTime > slotStartTime || altTeacherData.availableEndTime < slotEndTime) {
+                              continue;
+                            }
+                            
+                            // Check for conflicts with alternative teacher
+                            const altSlotConflict = hasConflict(
+                              day,
+                              slotStartTime,
+                              slotEndTime,
+                              altTeacherData,
+                              availableClassroom,
+                              request.section
+                            );
+                            
+                            if (!altSlotConflict.conflict) {
+                              // Alternative teacher works for this slot
+                              console.log(`     ✅ Found alternative teacher for slot ${slotStartTime}-${slotEndTime}: ${altTeacher.user.name || altTeacher.user.firstName + ' ' + altTeacher.user.lastName}`);
+                              request.teacher = altTeacherData;
+                              request.teacherUser = altTeacher.user;
+                              // Update available time slots for the new teacher
+                              updateAvailableTimeSlots();
+                              alternativeFound = true;
+                              break;
+                            }
+                          }
+                        }
+                        
+                        if (!alternativeFound) {
+                          allSlotsAvailable = false;
+                          break;
+                        }
                       }
                       
                       individualSlots.push({ start: slotStartTime, end: slotEndTime });
@@ -1733,7 +1928,7 @@ const AutoSchedule = () => {
                 <Typography variant="h6">Teachers</Typography>
               </Box>
               <Typography variant="h4" color="secondary">
-                {getTeacherUsers().length}
+                {teachers.length}
               </Typography>
             </CardContent>
           </Card>
@@ -1869,7 +2064,7 @@ const AutoSchedule = () => {
           size="large"
           startIcon={<AutoAwesomeIcon />}
           onClick={generateSchedule}
-          disabled={loading || !selectedSemester || filteredSections.length === 0 || getTeacherUsers().length === 0 || classrooms.length === 0 || subjects.length === 0}
+          disabled={loading || !selectedSemester || filteredSections.length === 0 || teachers.length === 0 || classrooms.length === 0 || subjects.length === 0}
         >
           Generate Schedule
         </Button>

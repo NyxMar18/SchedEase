@@ -270,18 +270,7 @@ const SubjectManagement = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Typography variant="h4" color="success.main">
-                {new Set(subjects.map(s => s.category)).size}
-              </Typography>
-              <Typography variant="body2" color="textSecondary">
-                Categories
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
+       
         <Grid item xs={12} sm={6} md={3}>
           <Card>
             <CardContent>

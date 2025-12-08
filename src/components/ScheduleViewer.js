@@ -20,6 +20,7 @@ import {
   Chip,
   Alert,
   LinearProgress,
+  CircularProgress,
   Button,
   TextField,
   InputAdornment,
@@ -332,8 +333,9 @@ const ScheduleViewer = () => {
   const [subjects, setSubjects] = useState([]);
   const [schoolYears, setSchoolYears] = useState([]);
   const [selectedSchoolYear, setSelectedSchoolYear] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [schedulesLoaded, setSchedulesLoaded] = useState(false); // Track if schedules have been loaded
 
   // Filter states
   const [filterType, setFilterType] = useState('all'); // 'all', 'classroom', 'teacher', 'section'
@@ -457,28 +459,14 @@ const ScheduleViewer = () => {
     }
   };
 
-  // Load all data
+  // Load reference data (classrooms, teachers, sections, subjects, school years) on mount
+  // But don't load schedules until user explicitly requests it
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchReferenceData = async () => {
       try {
         setLoading(true);
         
-        // Fetch schedules
-        const schedulesRes = await scheduleAPI.getAll();
-        let allSchedules = schedulesRes.data;
-        
-        // Filter schedules for teachers
-        allSchedules = filterSchedulesForTeacher(allSchedules);
-        
-        if (isTeacher() && user?.teacherId) {
-          console.log(`👨‍🏫 Teacher ${user.name} (teacherId: ${user.teacherId}, userId: ${user.id}) - Filtered to ${allSchedules.length} schedules`);
-          console.log('🔍 Sample schedule teacher structure:', allSchedules[0]?.teacher);
-        }
-        
-        setSchedules(allSchedules);
-        
-        // For teachers, we don't need to load all classrooms, teachers, and sections
-        // since they can only see their own schedules
+        // Load reference data needed for filters
         if (isAdmin()) {
           const [classroomsRes, teachersRes, sectionsRes, subjectsRes] = await Promise.all([
             classroomAPI.getAll(),
@@ -508,18 +496,47 @@ const ScheduleViewer = () => {
         
         setError(null);
       } catch (err) {
-        console.error('Error fetching data:', err);
-        setError('Failed to load schedule data');
+        console.error('Error fetching reference data:', err);
+        setError('Failed to load reference data');
       } finally {
         setLoading(false);
       }
     };
 
     if (user) {
-      fetchData();
+      fetchReferenceData();
       fetchSchoolYears();
     }
   }, [user, isTeacher, isAdmin]);
+
+  // Function to load schedules (called when user clicks "Load Schedules" button)
+  const loadSchedules = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Fetch schedules
+      const schedulesRes = await scheduleAPI.getAll();
+      let allSchedules = schedulesRes.data;
+      
+      // Filter schedules for teachers
+      allSchedules = filterSchedulesForTeacher(allSchedules);
+      
+      if (isTeacher() && user?.teacherId) {
+        console.log(`👨‍🏫 Teacher ${user.name} (teacherId: ${user.teacherId}, userId: ${user.id}) - Filtered to ${allSchedules.length} schedules`);
+        console.log('🔍 Sample schedule teacher structure:', allSchedules[0]?.teacher);
+      }
+      
+      setSchedules(allSchedules);
+      setSchedulesLoaded(true);
+      setError(null);
+    } catch (err) {
+      console.error('Error fetching schedules:', err);
+      setError('Failed to load schedule data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
 
   // Apply filters
@@ -580,22 +597,7 @@ const ScheduleViewer = () => {
   };
 
   const handleRefresh = async () => {
-    try {
-      setLoading(true);
-      const schedulesRes = await scheduleAPI.getAll();
-      let allSchedules = schedulesRes.data;
-      
-      // Apply teacher filtering
-      allSchedules = filterSchedulesForTeacher(allSchedules);
-      
-      setSchedules(allSchedules);
-      setError(null);
-    } catch (err) {
-      console.error('Error refreshing schedules:', err);
-      setError('Failed to refresh schedule data');
-    } finally {
-      setLoading(false);
-    }
+    await loadSchedules();
   };
 
   const handleExport = () => {
@@ -1478,21 +1480,25 @@ const ScheduleViewer = () => {
               <ViewComfyIcon />
             </IconButton>
           </Tooltip>
-          <Tooltip title="Refresh">
-            <IconButton onClick={handleRefresh} color="primary">
-              <RefreshIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Export CSV">
-            <IconButton onClick={handleExport} color="primary">
-              <DownloadIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Print">
-            <IconButton onClick={handlePrint} color="primary">
-              <PrintIcon />
-            </IconButton>
-          </Tooltip>
+          {schedulesLoaded && (
+            <>
+              <Tooltip title="Refresh">
+                <IconButton onClick={handleRefresh} color="primary" disabled={loading}>
+                  <RefreshIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Export CSV">
+                <IconButton onClick={handleExport} color="primary" disabled={filteredSchedules.length === 0}>
+                  <DownloadIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Print">
+                <IconButton onClick={handlePrint} color="primary" disabled={filteredSchedules.length === 0}>
+                  <PrintIcon />
+                </IconButton>
+              </Tooltip>
+            </>
+          )}
         </Box>
       </Box>
 
@@ -1678,14 +1684,44 @@ const ScheduleViewer = () => {
         </Card>
       )}
 
+      {/* Load Schedules Prompt */}
+      {!schedulesLoaded && (
+        <Card sx={{ mb: 3, bgcolor: 'info.light' }}>
+          <CardContent>
+            <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2}>
+              <Box>
+                <Typography variant="h6" gutterBottom>
+                  📋 Schedules Not Loaded
+                </Typography>
+                <Typography variant="body2" color="textSecondary">
+                  Set your filters above (School Year, Teacher, Section, etc.) and click "Load Schedules" to view schedules.
+                  This helps reduce initial page load time.
+                </Typography>
+              </Box>
+              <Button
+                variant="contained"
+                color="primary"
+                size="large"
+                onClick={loadSchedules}
+                disabled={loading}
+                startIcon={loading ? <CircularProgress size={20} /> : <RefreshIcon />}
+              >
+                {loading ? 'Loading...' : 'Load Schedules'}
+              </Button>
+            </Box>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Results Summary */}
-      <Box mb={2}>
-        <Typography variant="h6">
-          Showing {filteredSchedules.length} of {schedules.length} schedules
-          {selectedSchoolYear && (
-            <span> for <strong>{schoolYears.find(sy => sy.id === selectedSchoolYear)?.name || 'Selected School Year'}</strong></span>
-          )}
-        </Typography>
+      {schedulesLoaded && (
+        <Box mb={2}>
+          <Typography variant="h6">
+            Showing {filteredSchedules.length} of {schedules.length} schedules
+            {selectedSchoolYear && (
+              <span> for <strong>{schoolYears.find(sy => sy.id === selectedSchoolYear)?.name || 'Selected School Year'}</strong></span>
+            )}
+          </Typography>
         
         {/* Subject Mismatch Warning - Only for admins */}
         {isAdmin() && filterType === 'teacher' && selectedTeacher && (() => {
@@ -1718,10 +1754,24 @@ const ScheduleViewer = () => {
           }
           return null;
         })()}
-      </Box>
+        </Box>
+      )}
 
       {/* Schedules Display */}
-      {viewMode === 'table' ? (
+      {!schedulesLoaded ? (
+        <Card>
+          <CardContent>
+            <Box textAlign="center" py={4}>
+              <Typography variant="h6" color="textSecondary" gutterBottom>
+                No schedules loaded
+              </Typography>
+              <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+                Please set your filters and click "Load Schedules" above to view schedules.
+              </Typography>
+            </Box>
+          </CardContent>
+        </Card>
+      ) : viewMode === 'table' ? (
       <TableContainer component={Paper}>
         <Table>
           <TableHead>

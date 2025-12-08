@@ -240,9 +240,7 @@ const EnhancedAutoSchedule = () => {
         Advanced Auto Schedule Generator
       </Typography>
       <Typography variant="body1" color="textSecondary" sx={{ mb: 3 }}>
-        Generate an optimized, conflict-free schedule using advanced constraint satisfaction algorithms.
-        The system considers teacher availability, classroom capacity, subject priorities, and workload balancing
-        to create the best possible schedule for your institution.
+        Generates conflict-free schedules for all sections, teachers, and classrooms. Each section is scheduled for the full duration (hours per week) of their selected subjects. Teachers are matched to subjects based on their expertise. Schedules are evenly distributed across all days of the week and time slots for optimal balance. Generated schedules are automatically saved to the database.
       </Typography>
 
       {/* System Status */}
