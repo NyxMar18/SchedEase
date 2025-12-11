@@ -8,13 +8,6 @@ import {
   Chip,
   LinearProgress,
   Alert,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
   Collapse,
 } from '@mui/material';
 import {
@@ -242,12 +235,7 @@ const Dashboard = () => {
                   variant="outlined"
                   onClick={() => navigate('/schedule-viewer')}
                 />
-                <Chip
-                  label="Teacher Accounts"
-                  color="warning"
-                  variant="outlined"
-                  onClick={() => navigate('/teacher-accounts')}
-                />
+
               </Box>
             </CardContent>
           </Card>
@@ -499,60 +487,7 @@ const Dashboard = () => {
         </Card>
       )}
 
-      {/* Schedule Summary */}
-      {schedules.length > 0 && (
-        <Card sx={{ mb: 3 }}>
-          <CardContent>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => toggleSection('scheduleSummary')}>
-              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', mb: 0 }}>
-                <ScheduleIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-                Schedule Summary
-              </Typography>
-              {expandedSections.scheduleSummary ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-            </Box>
-          </CardContent>
-          <Collapse in={expandedSections.scheduleSummary}>
-            <CardContent sx={{ pt: 0 }}>
-              <Grid container spacing={2}>
-                <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle2" gutterBottom>Hours per Section:</Typography>
-                  {sections.map(section => {
-                    const sectionSchedules = schedules.filter(s => 
-                      (s.section?.sectionName === section.sectionName) || 
-                      (s.section === section.sectionName) ||
-                      (typeof s.section === 'object' && s.section?.id === section.id)
-                    );
-                    const totalHours = sectionSchedules.length;
-                    return (
-                      <Box key={section.id || section.sectionName} sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                        <Typography variant="body2">{section.sectionName}:</Typography>
-                        <Chip label={`${totalHours} hours`} size="small" color="primary" />
-                      </Box>
-                    );
-                  })}
-                </Grid>
-                <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle2" gutterBottom>Slots per Subject:</Typography>
-                  {subjects.map(subject => {
-                    const subjectSchedules = schedules.filter(s => s.subject === subject.name || s.subject?.name === subject.name);
-                    const totalSlots = subjectSchedules.length;
-                    return (
-                      <Box key={subject.id || subject.name} sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                        <Typography variant="body2">{subject.name}:</Typography>
-                        <Chip 
-                          label={`${totalSlots} slots`} 
-                          size="small" 
-                          color="success"
-                        />
-                      </Box>
-                    );
-                  })}
-                </Grid>
-              </Grid>
-            </CardContent>
-          </Collapse>
-        </Card>
-      )}
+    
 
       {/* Classroom Utilization */}
       {schedules.length > 0 && classrooms.length > 0 && (
@@ -579,7 +514,7 @@ const Dashboard = () => {
                     s.classroom?.roomName === classroom.roomName
                   ).length;
                   const totalCapacity = classroom.capacity || 0;
-                  const utilizationPercent = totalCapacity > 0 ? Math.round((usageCount / totalCapacity) * 100) : 0;
+                  const utilizationPercent = totalCapacity > 0 ? Math.round((usageCount / totalCapacity) * 15) : 0;
                   
                   return (
                     <Grid item xs={12} sm={6} md={4} key={classroom.id}>
@@ -646,7 +581,7 @@ const Dashboard = () => {
                   }).length;
                   
                   const teacherSubjects = teacher.subjects || [];
-                  const maxPossibleLoad = teacherSubjects.length * 3; // Assuming 3 hours per subject
+                  const maxPossibleLoad = teacherSubjects.length * 108; // Assuming 3 hours per subject
                   const workloadPercent = maxPossibleLoad > 0 ? Math.round((scheduleCount / maxPossibleLoad) * 100) : 0;
                   
                   return (

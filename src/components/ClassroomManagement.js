@@ -45,7 +45,6 @@ const ClassroomManagement = () => {
     roomCode: '',
     roomType: '',
     capacity: '',
-    description: '',
   });
 
   const roomTypes = ['Chemistry Lab', 'Biology Lab', 'Physics Lab', 'Computer Lab',  'Lecture Room', 'Physical Education Area'];
@@ -75,7 +74,6 @@ const ClassroomManagement = () => {
         roomCode: classroom.roomCode || '',
         roomType: classroom.roomType,
         capacity: classroom.capacity.toString(),
-        description: classroom.description || '',
       });
     } else {
       setEditingClassroom(null);
@@ -84,7 +82,6 @@ const ClassroomManagement = () => {
         roomCode: '',
         roomType: '',
         capacity: '',
-        description: '',
       });
     }
     setOpen(true);
@@ -98,7 +95,6 @@ const ClassroomManagement = () => {
       roomCode: '',
       roomType: '',
       capacity: '',
-      description: '',
     });
   };
 
@@ -189,7 +185,6 @@ const ClassroomManagement = () => {
                 <TableCell>Room Code</TableCell>
                 <TableCell>Type</TableCell>
                 <TableCell>Capacity</TableCell>
-                <TableCell>Description</TableCell>
                 <TableCell>Actions</TableCell>
               </TableRow>
             </TableHead>
@@ -202,7 +197,6 @@ const ClassroomManagement = () => {
                     <Chip label={classroom.roomType} color="primary" size="small" />
                   </TableCell>
                   <TableCell>{classroom.capacity}</TableCell>
-                  <TableCell>{classroom.description || '-'}</TableCell>
                   <TableCell>
                     <IconButton onClick={() => handleOpen(classroom)}>
                       <EditIcon />
@@ -270,16 +264,7 @@ const ClassroomManagement = () => {
                 inputProps={{ min: 1 }}
               />
             </Grid>
-            <Grid item xs={12}>
-              <TextField
-                label="Description"
-                value={formData.description}
-                onChange={handleChange('description')}
-                fullWidth
-                multiline
-                rows={3}
-              />
-            </Grid>
+            
           </Grid>
         </DialogContent>
         <DialogActions>
