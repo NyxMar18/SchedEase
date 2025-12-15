@@ -93,6 +93,18 @@ const TeacherAccountManager = () => {
       setLoading(true);
       setError('');
 
+      // Validate email is not already used
+      if (newTeacher.email.trim()) {
+        const emailExists = teachers.some(
+          teacher => teacher.email.toLowerCase() === newTeacher.email.trim().toLowerCase()
+        );
+        if (emailExists) {
+          setError('This email is already in use. Please use a different email address.');
+          setLoading(false);
+          return;
+        }
+      }
+
       const teacherData = {
         ...newTeacher,
         availableDays: newTeacher.availableDays.map(day => day.toUpperCase()),

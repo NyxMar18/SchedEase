@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -39,6 +39,7 @@ import {
   Error as ErrorIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
+  Stop as StopIcon,
 } from '@mui/icons-material';
 import { useLocation } from 'react-router-dom';
 import { sectionAPI } from '../firebase/sectionService';
@@ -73,6 +74,9 @@ const AutoSchedule = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const [operationType, setOperationType] = useState(null); // 'deleting' or 'generating'
+  const cancelOperationRef = useRef(false);
+  const abortControllerRef = useRef(null);
   
   // Collapsible sections state
   const [expandedSections, setExpandedSections] = useState({
@@ -1768,6 +1772,35 @@ const AutoSchedule = () => {
     setShowDeleteSchoolYearDialog(true);
   };
 
+  const stopOperation = () => {
+    if (window.confirm('Are you sure you want to cancel this operation?')) {
+      console.log('🛑 User requested to stop operation');
+      // Set cancellation flag first
+      cancelOperationRef.current = true;
+      
+      // Abort the HTTP request
+      if (abortControllerRef.current) {
+        console.log('🛑 Aborting HTTP request...');
+        try {
+          abortControllerRef.current.abort();
+        } catch (e) {
+          console.error('Error aborting request:', e);
+        }
+      }
+      
+      // Immediately update UI - don't wait for API response
+      setLoading(false);
+      setOperationType(null);
+      setError('Operation cancelled by user');
+      setSuccess(null);
+      
+      // Clear the abort controller
+      abortControllerRef.current = null;
+      
+      console.log('🛑 Operation stopped - UI updated');
+    }
+  };
+
   const handleDeleteSchedulesBySchoolYear = async () => {
     if (!deleteSelectedSchoolYear) {
       setError('Please select a school year to delete schedules from.');
@@ -1779,8 +1812,13 @@ const AutoSchedule = () => {
       return;
     }
 
+    // Reset cancellation flag
+    cancelOperationRef.current = false;
+    abortControllerRef.current = new AbortController();
+
     try {
       setLoading(true);
+      setOperationType('deleting');
       setError(null);
       
       console.log(`🗑️ Starting to delete schedules for school year: ${selectedSchoolYearName}...`);
@@ -1788,6 +1826,15 @@ const AutoSchedule = () => {
       // Get all existing schedules
       const existingSchedules = await scheduleAPI.getAll();
       console.log('📋 Schedule API response:', existingSchedules);
+      
+      // Check if operation was cancelled
+      if (cancelOperationRef.current) {
+        console.log('⚠️ Deletion cancelled before filtering');
+        setLoading(false);
+        setOperationType(null);
+        abortControllerRef.current = null;
+        return;
+      }
       
       // Filter schedules by selected school year
       // Handle different possible field names and types (schoolYearId, schoolYear.id, etc.)
@@ -1804,6 +1851,8 @@ const AutoSchedule = () => {
       if (schedulesToDelete.length === 0) {
         setSuccess(`✅ No schedules found for "${selectedSchoolYearName}".`);
         setShowDeleteSchoolYearDialog(false);
+        setLoading(false);
+        setOperationType(null);
         return;
       }
       
@@ -1812,20 +1861,61 @@ const AutoSchedule = () => {
       
       // Delete each schedule
       for (const schedule of schedulesToDelete) {
-          try {
-          console.log(`🗑️ Attempting to delete schedule:`, schedule);
-            await scheduleAPI.delete(schedule.id);
-            deletedCount++;
-            console.log(`✅ Deleted schedule ${deletedCount}: ${schedule.subject} - ${schedule.dayOfWeek} ${schedule.startTime}`);
-          } catch (deleteError) {
-            failedCount++;
-            console.error(`❌ Failed to delete schedule ${schedule.id}:`, deleteError);
+        // Check cancellation flag before each deletion
+        if (cancelOperationRef.current) {
+          console.log(`⚠️ Deletion cancelled. Deleted ${deletedCount} out of ${schedulesToDelete.length} schedules.`);
+          setError(`Operation cancelled. Deleted ${deletedCount} out of ${schedulesToDelete.length} schedules.`);
+          setLoading(false);
+          setOperationType(null);
+          abortControllerRef.current = null;
+          return;
         }
+
+        try {
+          console.log(`🗑️ Attempting to delete schedule:`, schedule);
+          // Note: scheduleAPI.delete may need to support abort signal in the future
+          await scheduleAPI.delete(schedule.id);
+          
+          // Check if deletion was aborted
+          if (cancelOperationRef.current) {
+            console.log(`⚠️ Deletion cancelled. Deleted ${deletedCount} out of ${schedulesToDelete.length} schedules.`);
+            setError(`Operation cancelled. Deleted ${deletedCount} out of ${schedulesToDelete.length} schedules.`);
+            setLoading(false);
+            setOperationType(null);
+            abortControllerRef.current = null;
+            return;
+          }
+          
+          deletedCount++;
+          console.log(`✅ Deleted schedule ${deletedCount}: ${schedule.subject} - ${schedule.dayOfWeek} ${schedule.startTime}`);
+        } catch (deleteError) {
+          // Check if error is due to cancellation
+          if (cancelOperationRef.current || deleteError.name === 'AbortError') {
+            console.log(`⚠️ Deletion cancelled. Deleted ${deletedCount} out of ${schedulesToDelete.length} schedules.`);
+            setError(`Operation cancelled. Deleted ${deletedCount} out of ${schedulesToDelete.length} schedules.`);
+            setLoading(false);
+            setOperationType(null);
+            abortControllerRef.current = null;
+            return;
+          }
+          failedCount++;
+          console.error(`❌ Failed to delete schedule ${schedule.id}:`, deleteError);
+        }
+      }
+      
+      // Check if operation was cancelled after loop
+      if (cancelOperationRef.current) {
+        console.log(`⚠️ Deletion cancelled. Deleted ${deletedCount} out of ${schedulesToDelete.length} schedules.`);
+        setError(`Operation cancelled. Deleted ${deletedCount} out of ${schedulesToDelete.length} schedules.`);
+        setLoading(false);
+        setOperationType(null);
+        abortControllerRef.current = null;
+        return;
       }
       
       // Clear local state if we deleted schedules for the currently selected school year
       if (deleteSelectedSchoolYear === selectedSchoolYear) {
-      setGeneratedSchedules([]);
+        setGeneratedSchedules([]);
         setFailedSchedules([]);
       }
       
@@ -1839,10 +1929,19 @@ const AutoSchedule = () => {
       setShowDeleteSchoolYearDialog(false);
       
     } catch (error) {
-      console.error('❌ Error during schedule deletion:', error);
-      setError('Failed to delete schedules: ' + error.message);
+      if (cancelOperationRef.current || error.name === 'AbortError') {
+        console.log('⚠️ Deletion cancelled');
+        setError('Operation cancelled by user');
+      } else {
+        console.error('❌ Error during schedule deletion:', error);
+        setError('Failed to delete schedules: ' + error.message);
+      }
     } finally {
+      // Always reset loading state
       setLoading(false);
+      setOperationType(null);
+      // Reset abort controller
+      abortControllerRef.current = null;
     }
   };
 
@@ -2983,11 +3082,21 @@ const AutoSchedule = () => {
       </Dialog>
 
       {/* Delete School Year Schedules Dialog */}
-      <Dialog open={showDeleteSchoolYearDialog} onClose={() => setShowDeleteSchoolYearDialog(false)} maxWidth="sm" fullWidth>
+      <Dialog open={showDeleteSchoolYearDialog} onClose={() => !loading && setShowDeleteSchoolYearDialog(false)} maxWidth="sm" fullWidth>
         <DialogTitle>
           Delete Schedules by School Year
         </DialogTitle>
         <DialogContent>
+          {loading && (
+            <Box sx={{ mb: 2 }}>
+              <LinearProgress sx={{ mb: 1 }} />
+              <Typography variant="body2" color="textSecondary" sx={{ textAlign: 'center' }}>
+                {operationType === 'deleting' 
+                  ? 'Deleting schedules. Click "Stop Operation" to cancel...'
+                  : 'Processing...'}
+              </Typography>
+            </Box>
+          )}
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
             Select a school year to delete all schedules from that year. This action cannot be undone.
           </Typography>
@@ -3023,18 +3132,45 @@ const AutoSchedule = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShowDeleteSchoolYearDialog(false)}>
+          <Button onClick={() => setShowDeleteSchoolYearDialog(false)} disabled={loading}>
             Cancel
           </Button>
-          <Button
-            onClick={handleDeleteSchedulesBySchoolYear}
-            variant="contained"
-            color="error"
-            disabled={!deleteSelectedSchoolYear || loading}
-            startIcon={<DeleteIcon />}
-          >
-            {loading ? 'Deleting...' : 'Delete Schedules'}
-          </Button>
+          {!loading ? (
+            <Button
+              onClick={handleDeleteSchedulesBySchoolYear}
+              variant="contained"
+              color="error"
+              disabled={!deleteSelectedSchoolYear}
+              startIcon={<DeleteIcon />}
+            >
+              Delete Schedules
+            </Button>
+          ) : (
+            <>
+              <Button
+              variant="contained"
+              disabled
+              startIcon={<DeleteIcon />}
+            >
+              {operationType === 'deleting' ? 'Deleting Schedules...' : 'Processing...'}
+            </Button>
+            <Button
+              variant="contained"
+              color="error"
+              startIcon={<StopIcon />}
+              onClick={stopOperation}
+              sx={{ 
+                backgroundColor: 'error.main',
+                color: 'white',
+                '&:hover': {
+                  backgroundColor: 'error.dark',
+                }
+              }}
+            >
+              Stop Operation
+            </Button>
+            </>
+          )}
         </DialogActions>
       </Dialog>
 

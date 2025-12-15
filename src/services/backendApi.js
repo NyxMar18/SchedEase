@@ -16,6 +16,11 @@ class BackendApiService {
       ...options,
     };
 
+    // Add abort signal if provided
+    if (options.signal) {
+      config.signal = options.signal;
+    }
+
     try {
       const response = await fetch(url, config);
       
@@ -26,6 +31,11 @@ class BackendApiService {
       const data = await response.json();
       return { success: true, data };
     } catch (error) {
+      // Don't treat abort errors as failures
+      if (error.name === 'AbortError') {
+        console.log('Request was aborted');
+        return { success: false, error: 'Request cancelled', aborted: true };
+      }
       console.error('API request failed:', error);
       return { success: false, error: error.message };
     }
@@ -54,15 +64,17 @@ class BackendApiService {
     });
   }
 
-  async deleteSchedule(id) {
+  async deleteSchedule(id, signal = null) {
     return this.request(`/schedules/${id}`, {
       method: 'DELETE',
+      signal: signal,
     });
   }
 
-  async generateOptimizedSchedule() {
+  async generateOptimizedSchedule(signal = null) {
     return this.request('/schedules/generate-optimized', {
       method: 'POST',
+      signal: signal,
     });
   }
 
@@ -201,8 +213,8 @@ export const scheduleApi = {
   getById: (id) => backendApi.getScheduleById(id),
   create: (schedule) => backendApi.createSchedule(schedule),
   update: (id, schedule) => backendApi.updateSchedule(id, schedule),
-  delete: (id) => backendApi.deleteSchedule(id),
-  generateOptimized: () => backendApi.generateOptimizedSchedule(),
+  delete: (id, signal) => backendApi.deleteSchedule(id, signal),
+  generateOptimized: (signal) => backendApi.generateOptimizedSchedule(signal),
   getStatistics: (startDate, endDate) => backendApi.getScheduleStatistics(startDate, endDate),
 };
 

@@ -148,6 +148,26 @@ const TeacherManagement = () => {
         setError('Email is required');
         return;
       }
+      // Check if email is already used (only when creating a new teacher, not when editing)
+      if (!editingTeacher) {
+        const emailExists = teachers.some(
+          teacher => teacher.email.toLowerCase() === formData.email.trim().toLowerCase()
+        );
+        if (emailExists) {
+          setError('This email is already in use. Please use a different email address.');
+          return;
+        }
+      } else {
+        // When editing, check if email is used by another teacher
+        const emailExists = teachers.some(
+          teacher => teacher.id !== editingTeacher.id && 
+                     teacher.email.toLowerCase() === formData.email.trim().toLowerCase()
+        );
+        if (emailExists) {
+          setError('This email is already in use by another teacher. Please use a different email address.');
+          return;
+        }
+      }
       if (!formData.subjects || formData.subjects.length === 0) {
         setError('At least one subject is required');
         return;

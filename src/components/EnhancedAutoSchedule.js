@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -37,6 +37,7 @@ import {
   Info as InfoIcon,
   Warning as WarningIcon,
   CheckCircle as CheckCircleIcon,
+  Stop as StopIcon,
 } from '@mui/icons-material';
 import { scheduleApi, teacherApi, classroomApi, sectionApi, subjectApi } from '../services/backendApi';
 
@@ -51,6 +52,9 @@ const EnhancedAutoSchedule = () => {
   const [success, setSuccess] = useState(null);
   const [schedulingResult, setSchedulingResult] = useState(null);
   const [showDetails, setShowDetails] = useState(false);
+  const [operationType, setOperationType] = useState(null); // 'generating' or 'deleting'
+  const cancelOperationRef = useRef(false);
+  const abortControllerRef = useRef(null);
 
   const daysOfWeek = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
   const timeSlots = [
@@ -66,6 +70,14 @@ const EnhancedAutoSchedule = () => {
   useEffect(() => {
     fetchData();
     loadExistingSchedules();
+
+    // Cleanup function to cancel any ongoing operations when component unmounts
+    return () => {
+      cancelOperationRef.current = true;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, []);
 
   const loadExistingSchedules = async () => {
@@ -102,6 +114,35 @@ const EnhancedAutoSchedule = () => {
     }
   };
 
+  const stopOperation = () => {
+    if (window.confirm('Are you sure you want to cancel this operation?')) {
+      console.log('🛑 User requested to stop operation');
+      // Set cancellation flag first
+      cancelOperationRef.current = true;
+      
+      // Abort the HTTP request
+      if (abortControllerRef.current) {
+        console.log('🛑 Aborting HTTP request...');
+        try {
+          abortControllerRef.current.abort();
+        } catch (e) {
+          console.error('Error aborting request:', e);
+        }
+      }
+      
+      // Immediately update UI - don't wait for API response
+      setLoading(false);
+      setOperationType(null);
+      setError('Operation cancelled by user');
+      setSuccess(null);
+      
+      // Clear the abort controller
+      abortControllerRef.current = null;
+      
+      console.log('🛑 Operation stopped - UI updated');
+    }
+  };
+
   const generateOptimizedSchedule = async () => {
     if (sections.length === 0) {
       setError('Please add sections first');
@@ -120,13 +161,47 @@ const EnhancedAutoSchedule = () => {
       return;
     }
 
+    // Reset cancellation flag
+    cancelOperationRef.current = false;
+    abortControllerRef.current = new AbortController();
+
     try {
       setLoading(true);
+      setOperationType('generating');
       setError(null);
       setSuccess(null);
 
       console.log('🚀 Generating optimized schedule...');
-      const result = await scheduleApi.generateOptimized();
+      
+      // Make the API call with abort signal
+      // The abort signal will cancel the HTTP request if user clicks stop
+      const result = await scheduleApi.generateOptimized(abortControllerRef.current.signal);
+
+      // Check if operation was cancelled or aborted BEFORE processing result
+      if (cancelOperationRef.current) {
+        console.log('⚠️ Schedule generation cancelled (flag detected after API call)');
+        // UI already updated by stopOperation, just exit
+        abortControllerRef.current = null;
+        return;
+      }
+
+      if (result && result.aborted) {
+        console.log('⚠️ Schedule generation cancelled (request aborted)');
+        setError('Schedule generation was cancelled');
+        setLoading(false);
+        setOperationType(null);
+        abortControllerRef.current = null;
+        return;
+      }
+      
+      // If result is null/undefined, might be cancelled
+      if (!result) {
+        console.log('⚠️ Schedule generation cancelled (no result)');
+        if (cancelOperationRef.current) {
+          abortControllerRef.current = null;
+          return;
+        }
+      }
 
       if (result.success) {
         setSchedulingResult(result.data);
@@ -146,9 +221,30 @@ const EnhancedAutoSchedule = () => {
         setError('Failed to generate schedule: ' + result.error);
       }
     } catch (err) {
-      setError('Failed to generate schedule: ' + err.message);
+      // Check if this was a cancellation
+      if (cancelOperationRef.current || err.name === 'AbortError' || err.message?.includes('aborted') || err.message?.includes('cancelled')) {
+        console.log('⚠️ Schedule generation cancelled (catch block):', err.name, err.message);
+        // If UI not already updated by stopOperation, update it now
+        if (!cancelOperationRef.current) {
+          setError('Schedule generation was cancelled');
+        }
+        setLoading(false);
+        setOperationType(null);
+        abortControllerRef.current = null;
+        return;
+      }
+      // Only show error if not cancelled
+      if (!cancelOperationRef.current) {
+        setError('Failed to generate schedule: ' + err.message);
+      }
     } finally {
-      setLoading(false);
+      // Only reset if not already cancelled (stopOperation already updated UI)
+      if (!cancelOperationRef.current) {
+        setLoading(false);
+        setOperationType(null);
+      }
+      // Always clear abort controller
+      abortControllerRef.current = null;
     }
   };
 
@@ -158,8 +254,13 @@ const EnhancedAutoSchedule = () => {
       return;
     }
 
+    // Reset cancellation flag
+    cancelOperationRef.current = false;
+    abortControllerRef.current = new AbortController();
+
     try {
       setLoading(true);
+      setOperationType('deleting');
       setError(null);
       
       console.log('🗑️ Starting to delete all schedules...');
@@ -168,6 +269,16 @@ const EnhancedAutoSchedule = () => {
       const result = await scheduleApi.getAll();
       if (!result.success) {
         setError('Failed to fetch schedules for deletion');
+        setLoading(false);
+        setOperationType(null);
+        return;
+      }
+      
+      // Check if operation was cancelled
+      if (cancelOperationRef.current) {
+        console.log('⚠️ Deletion cancelled before starting');
+        setLoading(false);
+        setOperationType(null);
         return;
       }
       
@@ -179,14 +290,50 @@ const EnhancedAutoSchedule = () => {
       
       // Delete each schedule
       for (const schedule of schedules) {
+        // Check cancellation flag before each deletion
+        if (cancelOperationRef.current) {
+          console.log(`⚠️ Deletion cancelled. Deleted ${deletedCount} out of ${schedules.length} schedules.`);
+          setError(`Operation cancelled. Deleted ${deletedCount} out of ${schedules.length} schedules.`);
+          setLoading(false);
+          setOperationType(null);
+          return;
+        }
+
         try {
-          await scheduleApi.delete(schedule.id);
+          const deleteResult = await scheduleApi.delete(schedule.id, abortControllerRef.current.signal);
+          
+          // Check if deletion was aborted
+          if (cancelOperationRef.current || deleteResult.aborted) {
+            console.log(`⚠️ Deletion cancelled. Deleted ${deletedCount} out of ${schedules.length} schedules.`);
+            setError(`Operation cancelled. Deleted ${deletedCount} out of ${schedules.length} schedules.`);
+            setLoading(false);
+            setOperationType(null);
+            return;
+          }
+          
           deletedCount++;
           console.log(`✅ Deleted schedule ${deletedCount}: ${schedule.subject?.name || 'Unknown'} - ${schedule.dayOfWeek} ${schedule.startTime}`);
         } catch (deleteError) {
+          // Check if error is due to cancellation
+          if (cancelOperationRef.current || deleteError.name === 'AbortError') {
+            console.log(`⚠️ Deletion cancelled. Deleted ${deletedCount} out of ${schedules.length} schedules.`);
+            setError(`Operation cancelled. Deleted ${deletedCount} out of ${schedules.length} schedules.`);
+            setLoading(false);
+            setOperationType(null);
+            return;
+          }
           failedCount++;
           console.error(`❌ Failed to delete schedule ${schedule.id}:`, deleteError);
         }
+      }
+      
+      // Check if operation was cancelled after loop
+      if (cancelOperationRef.current) {
+        console.log(`⚠️ Deletion cancelled. Deleted ${deletedCount} out of ${schedules.length} schedules.`);
+        setError(`Operation cancelled. Deleted ${deletedCount} out of ${schedules.length} schedules.`);
+        setLoading(false);
+        setOperationType(null);
+        return;
       }
       
       // Clear local state
@@ -202,10 +349,19 @@ const EnhancedAutoSchedule = () => {
       console.log(`🗑️ Deletion complete: ${deletedCount} deleted, ${failedCount} failed`);
       
     } catch (error) {
-      console.error('❌ Error during schedule deletion:', error);
-      setError('Failed to delete schedules: ' + error.message);
+      if (cancelOperationRef.current || error.name === 'AbortError') {
+        console.log('⚠️ Deletion cancelled');
+        setError('Operation cancelled by user');
+      } else {
+        console.error('❌ Error during schedule deletion:', error);
+        setError('Failed to delete schedules: ' + error.message);
+      }
     } finally {
+      // Always reset loading state
       setLoading(false);
+      setOperationType(null);
+      // Reset abort controller
+      abortControllerRef.current = null;
     }
   };
 
@@ -298,45 +454,86 @@ const EnhancedAutoSchedule = () => {
       </Card>
 
       {/* Action Buttons */}
-      <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
-        <Button
-          variant="contained"
-          size="large"
-          startIcon={<AutoAwesomeIcon />}
-          onClick={generateOptimizedSchedule}
-          disabled={loading || !validation.isValid}
-        >
-          Generate Optimized Schedule
-        </Button>
-        <Button
-          variant="outlined"
-          color="error"
-          startIcon={<DeleteIcon />}
-          onClick={deleteAllSchedules}
-          disabled={loading}
-          sx={{ 
-            borderColor: 'error.main',
-            color: 'error.main',
-            '&:hover': {
-              borderColor: 'error.dark',
-              backgroundColor: 'error.light',
-              color: 'error.dark'
-            }
-          }}
-        >
-          Delete All Schedules
-        </Button>
-        {schedulingResult && (
-          <Button
-            variant="outlined"
-            onClick={() => setShowDetails(true)}
-          >
-            View Details
-          </Button>
+      <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+        {!loading ? (
+          <>
+            <Button
+              variant="contained"
+              size="large"
+              startIcon={<AutoAwesomeIcon />}
+              onClick={generateOptimizedSchedule}
+              disabled={!validation.isValid}
+            >
+              Generate Optimized Schedule
+            </Button>
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<DeleteIcon />}
+              onClick={deleteAllSchedules}
+              sx={{ 
+                borderColor: 'error.main',
+                color: 'error.main',
+                '&:hover': {
+                  borderColor: 'error.dark',
+                  backgroundColor: 'error.light',
+                  color: 'error.dark'
+                }
+              }}
+            >
+              Delete All Schedules
+            </Button>
+            {schedulingResult && (
+              <Button
+                variant="outlined"
+                onClick={() => setShowDetails(true)}
+              >
+                View Details
+              </Button>
+            )}
+          </>
+        ) : (
+          <>
+            <Button
+              variant="contained"
+              size="large"
+              disabled
+              startIcon={<AutoAwesomeIcon />}
+            >
+              {operationType === 'generating' ? 'Generating Schedule...' : operationType === 'deleting' ? 'Deleting Schedules...' : 'Processing...'}
+            </Button>
+            <Button
+              variant="contained"
+              color="error"
+              size="large"
+              startIcon={<StopIcon />}
+              onClick={stopOperation}
+              sx={{ 
+                backgroundColor: 'error.main',
+                color: 'white',
+                '&:hover': {
+                  backgroundColor: 'error.dark',
+                }
+              }}
+            >
+              Stop Operation
+            </Button>
+          </>
         )}
       </Box>
 
-      {loading && <LinearProgress sx={{ mb: 2 }} />}
+      {loading && (
+        <Box sx={{ mb: 2 }}>
+          <LinearProgress sx={{ mb: 1 }} />
+          <Typography variant="body2" color="textSecondary" sx={{ textAlign: 'center' }}>
+            {operationType === 'generating' 
+              ? 'Generating optimized schedule. This may take a moment...' 
+              : operationType === 'deleting' 
+              ? 'Deleting schedules. Click "Stop Operation" to cancel...'
+              : 'Processing...'}
+          </Typography>
+        </Box>
+      )}
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
