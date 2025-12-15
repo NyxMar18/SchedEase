@@ -290,6 +290,36 @@ const ScheduleViewer = () => {
     isTeacher: isTeacher()
   });
 
+  // Helper function to check if a schedule belongs to the logged-in teacher
+  const scheduleBelongsToTeacher = (schedule) => {
+    if (!isTeacher() || !user) return false;
+    
+    const scheduleTeacher = schedule.teacher;
+    if (!scheduleTeacher) return false;
+    
+    // Convert to strings for comparison to handle type mismatches
+    const userTeacherId = String(user.teacherId || user.id || '');
+    const scheduleTeacherId = String(scheduleTeacher.id || scheduleTeacher.teacherId || '');
+    const userId = String(user.id || '');
+    
+    // Method 1: Direct ID match (teacherId or user.id)
+    if (scheduleTeacherId === userTeacherId || scheduleTeacherId === userId) return true;
+    
+    // Method 2: If schedule.teacher is a user object, check user.teacherId
+    if (scheduleTeacher.teacherId && String(scheduleTeacher.teacherId) === userTeacherId) return true;
+    
+    // Method 3: Check if the teacher's email matches the user's email
+    if (scheduleTeacher.email && user.email && scheduleTeacher.email === user.email) return true;
+    
+    // Method 4: If user has teacherId, check against schedule teacher id
+    if (user.teacherId && String(scheduleTeacher.id) === String(user.teacherId)) return true;
+    
+    // Method 5: If user.id matches schedule teacher id (for cases where teacherId is not set)
+    if (user.id && String(scheduleTeacher.id) === String(user.id)) return true;
+    
+    return false;
+  };
+
   // Helper function to filter schedules for teachers
   const filterSchedulesForTeacher = (schedules) => {
     let filteredSchedules = schedules;
@@ -304,22 +334,7 @@ const ScheduleViewer = () => {
     // Then filter by teacher if user is a teacher
     if (isTeacher() && user?.teacherId) {
       filteredSchedules = filteredSchedules.filter(schedule => {
-        const scheduleTeacher = schedule.teacher;
-        if (!scheduleTeacher) return false;
-        
-        // Method 1: Direct ID match
-        if (scheduleTeacher.id === user.teacherId) return true;
-        
-        // Method 2: If schedule.teacher is a user object, check user.teacherId
-        if (scheduleTeacher.teacherId === user.teacherId) return true;
-        
-        // Method 3: If schedule.teacher is the user object itself (same ID)
-        if (scheduleTeacher.id === user.id) return true;
-        
-        // Method 4: Check if the teacher's email matches the user's email
-        if (scheduleTeacher.email === user.email) return true;
-        
-        return false;
+        return scheduleBelongsToTeacher(schedule);
       });
     }
     
@@ -701,6 +716,12 @@ const ScheduleViewer = () => {
 
   // Handle edit button click
   const handleEditSchedule = (schedule) => {
+    // Only admins can edit schedules
+    if (!isAdmin()) {
+      setError('Only administrators can edit schedules');
+      return;
+    }
+    
     setEditingSchedule(schedule);
     setEditFormData({
       startTime: schedule.startTime || '',
@@ -739,6 +760,13 @@ const ScheduleViewer = () => {
   const handleSaveSchedule = async () => {
     try {
       setLoading(true);
+      
+      // Only admins can save schedule edits
+      if (!isAdmin()) {
+        setError('Only administrators can edit schedules');
+        setLoading(false);
+        return;
+      }
       
       // Check if schedule overlaps with break time
       const breakCheck = overlapsWithBreak(editFormData.startTime, editFormData.endTime);
@@ -1054,6 +1082,12 @@ const ScheduleViewer = () => {
 
   // Handle delete schedule
   const handleDeleteSchedule = (schedule) => {
+    // Only admins can delete schedules
+    if (!isAdmin()) {
+      setError('Only administrators can delete schedules');
+      return;
+    }
+    
     setScheduleToDelete(schedule);
     setDeleteDialogOpen(true);
   };
@@ -1062,6 +1096,15 @@ const ScheduleViewer = () => {
   const handleConfirmDelete = async () => {
     try {
       setLoading(true);
+      
+      // Only admins can delete schedules
+      if (!isAdmin()) {
+        setError('Only administrators can delete schedules');
+        setLoading(false);
+        setDeleteDialogOpen(false);
+        setScheduleToDelete(null);
+        return;
+      }
       
       await scheduleAPI.delete(scheduleToDelete.id);
       
@@ -1887,29 +1930,32 @@ const ScheduleViewer = () => {
                     />
                   </TableCell>
                   <TableCell>
-                    <Box display="flex" gap={1}>
-                      {/* Edit Button */}
-                      <Tooltip title="Edit Schedule">
-                        <IconButton
-                          size="small"
-                          onClick={() => handleEditSchedule(schedule)}
-                          color="primary"
-                        >
-                          <EditIcon />
-                        </IconButton>
-                      </Tooltip>
-                      
-                      {/* Delete Button */}
-                      <Tooltip title="Delete Schedule">
-                        <IconButton
-                          size="small"
-                          onClick={() => handleDeleteSchedule(schedule)}
-                          color="error"
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
+                    {/* Only admins can edit or delete schedules */}
+                    {isAdmin() && (
+                      <Box display="flex" gap={1}>
+                        {/* Edit Button */}
+                        <Tooltip title="Edit Schedule">
+                          <IconButton
+                            size="small"
+                            onClick={() => handleEditSchedule(schedule)}
+                            color="primary"
+                          >
+                            <EditIcon />
+                          </IconButton>
+                        </Tooltip>
+                        
+                        {/* Delete Button */}
+                        <Tooltip title="Delete Schedule">
+                          <IconButton
+                            size="small"
+                            onClick={() => handleDeleteSchedule(schedule)}
+                            color="error"
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    )}
                   </TableCell>
                 </TableRow>
               ))
@@ -2676,6 +2722,7 @@ const ScheduleViewer = () => {
                   value={editFormData.teacher}
                   label="Teacher"
                   onChange={handleEditFormChange('teacher')}
+                  disabled={isTeacher() && !isAdmin()}
                 >
                   {(() => {
                     // For edit, get the section from editingSchedule
