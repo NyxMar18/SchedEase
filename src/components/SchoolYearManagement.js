@@ -29,12 +29,12 @@ import {
 import {
   Add as AddIcon,
   Edit as EditIcon,
-  Delete as DeleteIcon,
+
   CalendarToday as CalendarTodayIcon,
   School as SchoolIcon,
 } from '@mui/icons-material';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, getDocs, doc, updateDoc,  query, orderBy } from 'firebase/firestore';
 import firebaseConfig from '../firebase/config';
 
 // Initialize Firebase
@@ -174,23 +174,7 @@ const SchoolYearManagement = () => {
     }
   };
 
-  const handleDelete = async (schoolYear) => {
-    if (window.confirm(`Are you sure you want to delete "${schoolYear.name}"?`)) {
-      try {
-        setLoading(true);
-        const schoolYearRef = doc(db, 'schoolYears', schoolYear.id);
-        await deleteDoc(schoolYearRef);
-        await fetchSchoolYears();
-        setSuccess('School year deleted successfully!');
-        setShowSuccessSnackbar(true);
-      } catch (err) {
-        console.error('Error deleting school year:', err);
-        setError('Failed to delete school year: ' + err.message);
-      } finally {
-        setLoading(false);
-      }
-    }
-  };
+
 
   const handleActivate = async (schoolYear) => {
     try {
@@ -315,15 +299,7 @@ const SchoolYearManagement = () => {
                               </IconButton>
                             </Tooltip>
                           )}
-                          <Tooltip title="Delete">
-                            <IconButton
-                              size="small"
-                              onClick={() => handleDelete(schoolYear)}
-                              color="error"
-                            >
-                              <DeleteIcon />
-                            </IconButton>
-                          </Tooltip>
+                         
                         </Box>
                       </TableCell>
                     </TableRow>
