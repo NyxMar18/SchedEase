@@ -8,6 +8,7 @@ import Dashboard from './components/Dashboard';
 import ClassroomManagement from './components/ClassroomManagement';
 import SectionManagement from './components/SectionManagement';
 import TeacherManagement from './components/TeacherManagement';
+import TeacherAccountManager from './components/TeacherAccountManager';
 import SubjectManagement from './components/SubjectManagement';
 import SchoolYearManagement from './components/SchoolYearManagement';
 import AutoSchedule from './components/AutoSchedule';
@@ -73,6 +74,14 @@ const AppRoutes = () => {
         <ProtectedRoute requiredRole="admin">
           <Layout>
             <TeacherManagement />
+          </Layout>
+        </ProtectedRoute>
+      } />
+
+      <Route path="/teacher-accounts" element={
+        <ProtectedRoute requiredRole="admin">
+          <Layout>
+            <TeacherAccountManager />
           </Layout>
         </ProtectedRoute>
       } />

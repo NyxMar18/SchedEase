@@ -271,6 +271,7 @@ const TeacherAccountManager = () => {
                       <TableCell>Subject</TableCell>
                       <TableCell>User Account</TableCell>
                       <TableCell>Default Password</TableCell>
+                      <TableCell>Password Reset</TableCell>
                       <TableCell>Actions</TableCell>
                     </TableRow>
                   </TableHead>
@@ -309,21 +310,56 @@ const TeacherAccountManager = () => {
                             )}
                           </TableCell>
                           <TableCell>
+                            {user?.resetRequested ? (
+                              <Chip label="Requested" color="warning" size="small" />
+                            ) : (
+                              <Chip label="None" size="small" />
+                            )}
+                          </TableCell>
+                          <TableCell>
                             {user && (
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                startIcon={<LoginIcon />}
-                                onClick={() => {
-                                  setTestCredentials({
-                                    email: teacher.email,
-                                    password: '1234'
-                                  });
-                                  setTestLoginOpen(true);
-                                }}
-                              >
-                                Test Login
-                              </Button>
+                              <Box sx={{ display: 'flex', gap: 1 }}>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  startIcon={<LoginIcon />}
+                                  onClick={() => {
+                                    setTestCredentials({
+                                      email: teacher.email,
+                                      password: '1234'
+                                    });
+                                    setTestLoginOpen(true);
+                                  }}
+                                >
+                                  Test Login
+                                </Button>
+                                {user.resetRequested && (
+                                  <Button
+                                    size="small"
+                                    variant="contained"
+                                    color="warning"
+                                    onClick={async () => {
+                                      try {
+                                        setLoading(true);
+                                        setError('');
+                                        const result = await userAPI.resetPasswordToDefault(user.id);
+                                        if (result.success) {
+                                          setSuccess(`Password for ${teacher.firstName} ${teacher.lastName} has been reset to the default password.`);
+                                          fetchData();
+                                        } else {
+                                          setError(result.message || 'Failed to reset password');
+                                        }
+                                      } catch (err) {
+                                        setError('Failed to reset password: ' + err.message);
+                                      } finally {
+                                        setLoading(false);
+                                      }
+                                    }}
+                                  >
+                                    Reset to Default
+                                  </Button>
+                                )}
+                              </Box>
                             )}
                           </TableCell>
                         </TableRow>

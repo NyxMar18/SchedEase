@@ -298,6 +298,26 @@ const Dashboard = () => {
                   }}
                 />
                 <Chip
+                  label="Teacher Accounts"
+                  color="secondary"
+                  variant="outlined"
+                  onClick={() => navigate('/teacher-accounts')}
+                  sx={{
+                    fontSize: '0.875rem',
+                    fontWeight: 500,
+                    py: 2.5,
+                    borderWidth: 2,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease-in-out',
+                    '&:hover': {
+                      bgcolor: 'secondary.main',
+                      color: 'white',
+                      transform: 'translateY(-2px)',
+                      boxShadow: 2,
+                    },
+                  }}
+                />
+                <Chip
                   label="Generate Schedule"
                   color="success"
                   variant="outlined"

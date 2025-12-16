@@ -17,6 +17,10 @@ import {
   Slide,
   Avatar,
   Chip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import {
   Login as LoginIcon,
@@ -40,6 +44,10 @@ const Login = ({ onBackToLanding }) => {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotMessage, setForgotMessage] = useState('');
+  const [forgotError, setForgotError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const { login, user } = useAuth();
   const navigate = useNavigate();
@@ -55,6 +63,27 @@ const Login = ({ onBackToLanding }) => {
 
   const handleClickShowPassword = () => {
     setShowPassword(!showPassword);
+  };
+
+  const handleForgotPassword = async () => {
+    setForgotLoading(true);
+    setForgotMessage('');
+    setForgotError('');
+
+    try {
+      const { userAPI } = await import('../services/userService');
+      const result = await userAPI.requestPasswordReset(formData.email.trim());
+
+      if (result.success) {
+        setForgotMessage('Password reset request sent. Please contact your admin to approve and reset your password to the default.');
+      } else {
+        setForgotError(result.message || 'Failed to send reset request.');
+      }
+    } catch (err) {
+      setForgotError('Error sending reset request.');
+    } finally {
+      setForgotLoading(false);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -291,6 +320,25 @@ const Login = ({ onBackToLanding }) => {
                     >
                       {loading ? 'Signing In...' : 'Sign In'}
                     </Button>
+
+                    {/* Forgot Password */}
+                    <Box sx={{ textAlign: 'right' }}>
+                      <Button
+                        type="button"
+                        size="small"
+                        onClick={() => {
+                          setForgotMessage('');
+                          setForgotError('');
+                          setForgotOpen(true);
+                        }}
+                        sx={{
+                          textTransform: 'none',
+                          fontSize: '0.85rem',
+                        }}
+                      >
+                        Forgot password?
+                      </Button>
+                    </Box>
                   </Box>
                 </Slide>
               </form>
@@ -340,6 +388,47 @@ const Login = ({ onBackToLanding }) => {
           </Paper>
         </Fade>
       </Container>
+
+      {/* Forgot Password Dialog */}
+      <Dialog open={forgotOpen} onClose={() => setForgotOpen(false)}>
+        <DialogTitle>Forgot Password</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Enter your email and we will notify your admin. Once approved, your password will be reset back to your default password.
+          </Typography>
+          <TextField
+            fullWidth
+            label="Email"
+            type="email"
+            value={formData.email}
+            onChange={handleChange}
+            name="email"
+            margin="normal"
+          />
+          {forgotMessage && (
+            <Alert severity="success" sx={{ mt: 1 }}>
+              {forgotMessage}
+            </Alert>
+          )}
+          {forgotError && (
+            <Alert severity="error" sx={{ mt: 1 }}>
+              {forgotError}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setForgotOpen(false)}>
+            Close
+          </Button>
+          <Button
+            onClick={handleForgotPassword}
+            disabled={forgotLoading || !formData.email.trim()}
+            variant="contained"
+          >
+            {forgotLoading ? <CircularProgress size={18} /> : 'Send Request'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

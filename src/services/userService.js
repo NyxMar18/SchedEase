@@ -101,6 +101,7 @@ export const userAPI = {
         lastName: teacherData.lastName,
         role: 'teacher',
         teacherId: teacherData.id,
+        isDefaultPassword: true,
         createdAt: new Date().toISOString()
       };
       
@@ -126,6 +127,11 @@ export const userAPI = {
       console.error('Error getting users:', error);
       return { success: false, message: error.message };
     }
+  },
+
+  // Alias used by some components
+  getAllUsers: async () => {
+    return userAPI.getAll();
   },
 
   // Update user
@@ -159,10 +165,67 @@ export const userAPI = {
       }
       
       // Update with new password
-      await updateDoc(userRef, { password: newPassword });
+      await updateDoc(userRef, { password: newPassword, isDefaultPassword: false });
       return { success: true };
     } catch (error) {
       console.error('Error changing password:', error);
+      return { success: false, message: error.message };
+    }
+  },
+
+  // User requests a password reset (flag for admin)
+  requestPasswordReset: async (email) => {
+    try {
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('email', '==', email));
+      const querySnapshot = await getDocs(q);
+
+      if (querySnapshot.empty) {
+        return { success: false, message: 'User not found' };
+      }
+
+      const userDoc = querySnapshot.docs[0];
+      const userRef = doc(db, 'users', userDoc.id);
+
+      await updateDoc(userRef, {
+        resetRequested: true,
+        resetRequestedAt: new Date().toISOString()
+      });
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error requesting password reset:', error);
+      return { success: false, message: error.message };
+    }
+  },
+
+  // Admin approves and resets password back to default
+  resetPasswordToDefault: async (userId) => {
+    try {
+      const userRef = doc(db, 'users', userId);
+      const userDoc = await getDoc(userRef);
+
+      if (!userDoc.exists()) {
+        return { success: false, message: 'User not found' };
+      }
+
+      const userData = userDoc.data();
+
+      let defaultPassword = '1234';
+      if (userData.role === 'admin') {
+        defaultPassword = 'admin123';
+      }
+
+      await updateDoc(userRef, {
+        password: defaultPassword,
+        isDefaultPassword: true,
+        resetRequested: false,
+        lastPasswordResetAt: new Date().toISOString()
+      });
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error resetting password to default:', error);
       return { success: false, message: error.message };
     }
   },
