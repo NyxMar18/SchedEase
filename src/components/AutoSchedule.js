@@ -1989,14 +1989,7 @@ const AutoSchedule = () => {
         <AutoAwesomeIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
         Auto Schedule Generator
       </Typography>
-      <Typography variant="body1" color="textSecondary" sx={{ mb: 3 }}>
-        Generate a conflict-free schedule for all sections, teachers, and classrooms.
-        Each section will be scheduled for the full duration (hours per week) of their selected subjects.
-        For example, if Mathematics requires 3 hours per week, the section will get 3 separate time slots for Mathematics.
-        Teachers will be matched to subjects based on their subject expertise.
-        Schedules are evenly distributed across all days of the week and time slots for optimal balance.
-        Generated schedules will be automatically saved to the database.
-      </Typography>
+
 
 
       {/* Statistics Cards */}
@@ -2854,22 +2847,8 @@ const AutoSchedule = () => {
         </Card>
       )}
 
-      {/* Debug Display - Remove this after testing */}
-      <Card sx={{ mb: 2, bgcolor: 'grey.100' }}>
-        <CardContent>
-          <Typography variant="body2" component="div">
-            <strong>Debug Info:</strong> Failed Schedules Count: {failedSchedules.length}
-            {failedSchedules.length > 0 && (
-              <Box sx={{ mt: 1 }}>
-                <strong>Failed Schedules:</strong>
-                <Box component="pre" sx={{ mt: 1, p: 1, bgcolor: 'grey.200', borderRadius: 1, overflow: 'auto' }}>
-                  {JSON.stringify(failedSchedules, null, 2)}
-                </Box>
-              </Box>
-            )}
-          </Typography>
-        </CardContent>
-      </Card>
+    
+
 
       {/* Failed Schedules Table */}
       {failedSchedules.length > 0 && (
