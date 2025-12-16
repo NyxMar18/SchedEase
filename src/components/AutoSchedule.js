@@ -278,8 +278,13 @@ const AutoSchedule = () => {
       return;
     }
 
+    // Reset cancellation flag
+    cancelOperationRef.current = false;
+    abortControllerRef.current = new AbortController();
+
     try {
       setLoading(true);
+      setOperationType('generating');
       setError(null);
 
       console.log('🚀 Starting schedule generation...');
@@ -321,8 +326,20 @@ const AutoSchedule = () => {
         });
         console.log(`📋 Loaded ${existingSchedules.length} existing schedules for conflict checking (school year: ${selectedSchoolYear}, semester: ${selectedSemester})`);
         console.log(`📊 Total schedules in database: ${allSchedules.length}, filtered to ${existingSchedules.length} for selected school year and semester`);
+        
+        // Check if schedules already exist for this school year and semester
+        if (existingSchedules.length > 0) {
+          const selectedSchoolYearName = schoolYears.find(sy => sy.id === selectedSchoolYear)?.name || selectedSchoolYear;
+          setError(`Cannot generate schedules: Schedules already exist for school year "${selectedSchoolYearName}" and semester "${selectedSemester}". Please delete existing schedules first or select a different school year/semester.`);
+          setLoading(false);
+          setOperationType(null);
+          abortControllerRef.current = null;
+          return;
+        }
       } catch (error) {
         console.log('⚠️ Could not load existing schedules:', error);
+        // If we can't check for existing schedules, log a warning but allow generation to proceed
+        console.warn('⚠️ Warning: Could not verify if schedules already exist. Proceeding with generation...');
       }
 
       const schedules = [];
@@ -549,80 +566,6 @@ const AutoSchedule = () => {
         
         teacherUsageList.sort((a, b) => a.count - b.count);
         return teacherUsageList[0]?.teacher;
-      };
-      
-      // Helper function to find alternative teachers who can teach the same subject and section
-      const findAlternativeTeachers = (subject, section, currentTeacherId, sectionAvailableDays) => {
-        const teacherUsers = getTeacherUsers();
-        const alternatives = [];
-        
-        // Check if section has assigned teachers by looking at all teachers
-        let sectionHasAssignedTeachers = false;
-        for (const user of teacherUsers) {
-          const teacherData = getTeacherDataForUser(user);
-          const assignedSectionIds = teacherData?.assignedSections || [];
-          if (assignedSectionIds.length > 0) {
-            const sectionIdStr = String(section.id);
-            const assignedIds = assignedSectionIds.map(id => String(id));
-            if (assignedIds.includes(sectionIdStr)) {
-              sectionHasAssignedTeachers = true;
-              break;
-            }
-          }
-        }
-        
-        for (const user of teacherUsers) {
-          // Skip the current teacher
-          const userId = user.id;
-          if (String(userId) === String(currentTeacherId)) continue;
-          
-          const teacherData = getTeacherDataForUser(user);
-          
-          // Check if teacher can teach this subject
-          let canTeachSubject = false;
-          if (teacherData?.subjects && Array.isArray(teacherData.subjects)) {
-            canTeachSubject = teacherData.subjects.includes(subject.name);
-          } else {
-            const userSubject = user.subject || teacherData?.subject;
-            canTeachSubject = userSubject === subject.name;
-          }
-          
-          if (!canTeachSubject) continue;
-          
-          // Check section assignment: if section has assigned teachers, only consider assigned teachers
-          // If section has no assigned teachers, consider any teacher who can teach the subject
-          if (sectionHasAssignedTeachers) {
-            const sectionIdStr = String(section.id);
-            const assignedSectionIds = teacherData?.assignedSections || [];
-            if (assignedSectionIds.length === 0) continue; // Section has assigned teachers, but this teacher isn't assigned
-            const assignedIds = assignedSectionIds.map(id => String(id));
-            if (!assignedIds.includes(sectionIdStr)) continue; // This teacher is not assigned to this section
-          }
-          // If section has no assigned teachers, any teacher who can teach the subject is eligible
-          
-          // Check if teacher is available on at least one of the available days
-          const teacher = teacherData || user;
-          if (!teacher?.availableDays || !Array.isArray(teacher.availableDays)) {
-            continue;
-          }
-          
-          const isAvailableOnDays = sectionAvailableDays.some(day => teacher.availableDays.includes(day));
-          if (!isAvailableOnDays) continue;
-          
-          // Check if teacher has valid time window
-          if (!teacher.availableStartTime || !teacher.availableEndTime) continue;
-          
-          alternatives.push({ user, teacherData: teacher });
-        }
-        
-        // Sort by usage (least used first)
-        alternatives.sort((a, b) => {
-          const countA = teacherUsage[a.user.id] || 0;
-          const countB = teacherUsage[b.user.id] || 0;
-          return countA - countB;
-        });
-        
-        return alternatives;
       };
       
       
@@ -1167,6 +1110,16 @@ const AutoSchedule = () => {
 
       // Process each scheduling request with uniform time slots across the week
       for (const request of schedulingRequests) {
+        // Check if operation was cancelled
+        if (cancelOperationRef.current) {
+          console.log(`⚠️ Schedule generation cancelled. Processed ${schedules.length} schedules before cancellation.`);
+          setError(`Operation cancelled. Generated ${schedules.length} schedules before cancellation.`);
+          setLoading(false);
+          setOperationType(null);
+          abortControllerRef.current = null;
+          return;
+        }
+
         if (request.uniformSchedule) {
           // Handle uniform schedule - each session on a single day
         let assigned = false;
@@ -1175,30 +1128,21 @@ const AutoSchedule = () => {
         
           // Get available time slots for this teacher - utilize ALL time slots within teacher's availability window
           // Filter for 1.5 hour slots that don't span breaks and fall within teacher's time window
-          // This function will be called with the current teacher (which may change if alternatives are found)
-          const getAvailableTimeSlotsForTeacher = (teacher) => {
-            if (!teacher || !teacher.availableStartTime || !teacher.availableEndTime) {
-              return [];
-            }
-            return timeSlots.filter(slot => {
-              const teacherStartTime = teacher.availableStartTime;
-              const teacherEndTime = teacher.availableEndTime;
-              // Calculate slot duration
-              const startTime = new Date(`2000-01-01 ${slot.start}`);
-              const endTime = new Date(`2000-01-01 ${slot.end}`);
-              const durationMinutes = (endTime - startTime) / (1000 * 60);
-              // Only use 1.5 hour (90 minute) slots that don't span across breaks
-              const is90Minutes = durationMinutes === 90;
-              const doesNotSpanBreaks = !spansAcrossBreak(slot.start, slot.end);
-              const doesNotOverlapBreaks = !overlapsWithBreak(slot.start, slot.end);
-              // Ensure slot is fully within teacher's availability window (utilize full time range)
-              const slotWithinTeacherWindow = teacherStartTime <= slot.start && teacherEndTime >= slot.end;
-              return slotWithinTeacherWindow && is90Minutes && doesNotSpanBreaks && doesNotOverlapBreaks;
-            });
-          };
-          
-          // Get initial available time slots for the current teacher
-          let availableTimeSlots = getAvailableTimeSlotsForTeacher(request.teacher);
+          const availableTimeSlots = timeSlots.filter(slot => {
+            const teacherStartTime = request.teacher.availableStartTime;
+            const teacherEndTime = request.teacher.availableEndTime;
+            // Calculate slot duration
+            const startTime = new Date(`2000-01-01 ${slot.start}`);
+            const endTime = new Date(`2000-01-01 ${slot.end}`);
+            const durationMinutes = (endTime - startTime) / (1000 * 60);
+            // Only use 1.5 hour (90 minute) slots that don't span across breaks
+            const is90Minutes = durationMinutes === 90;
+            const doesNotSpanBreaks = !spansAcrossBreak(slot.start, slot.end);
+            const doesNotOverlapBreaks = !overlapsWithBreak(slot.start, slot.end);
+            // Ensure slot is fully within teacher's availability window (utilize full time range)
+            const slotWithinTeacherWindow = teacherStartTime <= slot.start && teacherEndTime >= slot.end;
+            return slotWithinTeacherWindow && is90Minutes && doesNotSpanBreaks && doesNotOverlapBreaks;
+          });
           
           const teacherName = request.teacher?.name || request.teacher?.firstName + ' ' + request.teacher?.lastName || 'Unknown';
           const teacherAvailableDays = request.teacher?.availableDays || [];
@@ -1208,14 +1152,6 @@ const AutoSchedule = () => {
             suitableTimeSlots: availableTimeSlots.length,
             timeSlotDetails: availableTimeSlots.map(s => `${s.start}-${s.end}`).join(', ')
           });
-          
-          // Helper to update available time slots when teacher changes
-          const updateAvailableTimeSlots = () => {
-            availableTimeSlots = getAvailableTimeSlotsForTeacher(request.teacher);
-            if (availableTimeSlots.length > 0) {
-              console.log(`   📊 Updated available time slots for new teacher: ${availableTimeSlots.length} slots`);
-            }
-          };
 
           // Get days already used for this subject's other sessions
           const subjectKey = `${request.subject.id || request.subject.name}-${request.section.id || request.section.sectionName}`;
@@ -1354,66 +1290,11 @@ const AutoSchedule = () => {
               );
               
               if (overallConflict.conflict) {
-                // Try to find an alternative teacher who can teach this subject and section
+                // Skip this time slot due to conflict
                 const teacherName = request.teacher?.name || request.teacher?.firstName + ' ' + request.teacher?.lastName || 'Unknown';
-                const currentTeacherId = request.teacher?.id || request.teacherUser?.id;
-                console.log(`     ⚠️ Overall conflict detected for ${request.subject.name} (Teacher: ${teacherName}, ID: ${currentTeacherId}) on ${day} at ${timeSlot.start}-${timeSlot.end}: ${overallConflict.reason} - ${overallConflict.details}`);
-                console.log(`     🔄 Attempting to find alternative teacher for ${request.subject.name} in section ${request.section.sectionName}...`);
-                
-                // Find alternative teachers
-                const alternativeTeachers = findAlternativeTeachers(
-                  request.subject,
-                  request.section,
-                  currentTeacherId,
-                  sortedAvailableDays
-                );
-                
-                let alternativeFound = false;
-                if (alternativeTeachers.length > 0) {
-                  // Try each alternative teacher
-                  for (const altTeacher of alternativeTeachers) {
-                    const altTeacherData = altTeacher.teacherData || altTeacher.user;
-                    const altTeacherId = altTeacher.user.id;
-                    
-                    // Check if this alternative teacher is available on this day
-                    if (!altTeacherData.availableDays || !altTeacherData.availableDays.includes(day)) {
-                      continue;
-                    }
-                    
-                    // Check if the time slot is within alternative teacher's availability window
-                    if (altTeacherData.availableStartTime > timeSlot.start || altTeacherData.availableEndTime < timeSlot.end) {
-                      continue;
-                    }
-                    
-                    // Check for conflicts with the alternative teacher
-                    const altConflict = hasConflict(
-                      day,
-                      timeSlot.start,
-                      timeSlot.end,
-                      altTeacherData,
-                      availableClassroom,
-                      request.section
-                    );
-                    
-                    if (!altConflict.conflict) {
-                      // Alternative teacher is available! Update the request
-                      console.log(`     ✅ Found alternative teacher: ${altTeacher.user.name || altTeacher.user.firstName + ' ' + altTeacher.user.lastName} (ID: ${altTeacherId})`);
-                      request.teacher = altTeacherData;
-                      request.teacherUser = altTeacher.user;
-                      // Update available time slots for the new teacher
-                      updateAvailableTimeSlots();
-                      alternativeFound = true;
-                      break;
-                    }
-                  }
-                }
-                
-                if (!alternativeFound) {
-                  // No alternative teacher found, skip this time slot
-                  console.log(`     ❌ No alternative teacher available for ${request.subject.name} in section ${request.section.sectionName} on ${day} at ${timeSlot.start}-${timeSlot.end}`);
-                  slotTriedOnAllDays = (day === sortedAvailableDays[sortedAvailableDays.length - 1]);
-                  continue;
-                }
+                console.log(`     ⚠️ Overall conflict detected for ${request.subject.name} (Teacher: ${teacherName}, ID: ${request.teacher?.id || request.teacherUser?.id}) on ${day} at ${timeSlot.start}-${timeSlot.end}: ${overallConflict.reason} - ${overallConflict.details}`);
+                slotTriedOnAllDays = (day === sortedAvailableDays[sortedAvailableDays.length - 1]);
+                continue;
               }
                   
                   // Check exact slot match
@@ -1465,57 +1346,8 @@ const AutoSchedule = () => {
                       
                       if (slotConflict.conflict) {
                         console.log(`   🔴 Slot conflict at ${slotStartTime}-${slotEndTime}: ${slotConflict.reason} - ${slotConflict.details}`);
-                        
-                        // Try to find an alternative teacher for this slot
-                        const currentTeacherId = request.teacher?.id || request.teacherUser?.id;
-                        const alternativeTeachers = findAlternativeTeachers(
-                          request.subject,
-                          request.section,
-                          currentTeacherId,
-                          sortedAvailableDays
-                        );
-                        
-                        let alternativeFound = false;
-                        if (alternativeTeachers.length > 0) {
-                          for (const altTeacher of alternativeTeachers) {
-                            const altTeacherData = altTeacher.teacherData || altTeacher.user;
-                            
-                            // Check if alternative teacher is available on this day and time
-                            if (!altTeacherData.availableDays || !altTeacherData.availableDays.includes(day)) {
-                              continue;
-                            }
-                            
-                            if (altTeacherData.availableStartTime > slotStartTime || altTeacherData.availableEndTime < slotEndTime) {
-                              continue;
-                            }
-                            
-                            // Check for conflicts with alternative teacher
-                            const altSlotConflict = hasConflict(
-                              day,
-                              slotStartTime,
-                              slotEndTime,
-                              altTeacherData,
-                              availableClassroom,
-                              request.section
-                            );
-                            
-                            if (!altSlotConflict.conflict) {
-                              // Alternative teacher works for this slot
-                              console.log(`     ✅ Found alternative teacher for slot ${slotStartTime}-${slotEndTime}: ${altTeacher.user.name || altTeacher.user.firstName + ' ' + altTeacher.user.lastName}`);
-                              request.teacher = altTeacherData;
-                              request.teacherUser = altTeacher.user;
-                              // Update available time slots for the new teacher
-                              updateAvailableTimeSlots();
-                              alternativeFound = true;
-                              break;
-                            }
-                          }
-                        }
-                        
-                        if (!alternativeFound) {
-                          allSlotsAvailable = false;
-                          break;
-                        }
+                        allSlotsAvailable = false;
+                        break;
                       }
                       
                       individualSlots.push({ start: slotStartTime, end: slotEndTime });
@@ -1679,15 +1511,44 @@ const AutoSchedule = () => {
 
       console.log('🎯 Final schedule count before saving:', schedules.length);
 
+      // Check if operation was cancelled before saving
+      if (cancelOperationRef.current) {
+        console.log(`⚠️ Schedule generation cancelled before saving. Generated ${schedules.length} schedules.`);
+        setError(`Operation cancelled. Generated ${schedules.length} schedules but did not save to database.`);
+        setLoading(false);
+        setOperationType(null);
+        abortControllerRef.current = null;
+        return;
+      }
+
       // Save schedules to database
       let savedCount = 0;
       let failedCount = 0;
       
       for (const schedule of schedules) {
+        // Check cancellation flag before each save
+        if (cancelOperationRef.current) {
+          console.log(`⚠️ Schedule generation cancelled. Saved ${savedCount} out of ${schedules.length} schedules.`);
+          setError(`Operation cancelled. Saved ${savedCount} out of ${schedules.length} schedules to database.`);
+          setLoading(false);
+          setOperationType(null);
+          abortControllerRef.current = null;
+          return;
+        }
+
         try {
           await scheduleAPI.create(schedule);
           savedCount++;
         } catch (error) {
+          // Check if error is due to cancellation
+          if (cancelOperationRef.current || error.name === 'AbortError') {
+            console.log(`⚠️ Schedule generation cancelled. Saved ${savedCount} out of ${schedules.length} schedules.`);
+            setError(`Operation cancelled. Saved ${savedCount} out of ${schedules.length} schedules to database.`);
+            setLoading(false);
+            setOperationType(null);
+            abortControllerRef.current = null;
+            return;
+          }
           console.error('Failed to save schedule:', error);
           failedCount++;
         }
@@ -1759,18 +1620,21 @@ const AutoSchedule = () => {
       // Removed loadExistingSchedules() call to improve performance
       // Schedules are saved to database and will be available on next page load
     } catch (err) {
-      console.error('Schedule generation error:', err);
-      setError(`Failed to generate schedule: ${err.message || err.toString()}`);
+      // Check if error is due to cancellation
+      if (cancelOperationRef.current || err.name === 'AbortError') {
+        console.log('⚠️ Schedule generation cancelled');
+        setError('Operation cancelled by user');
+      } else {
+        console.error('Schedule generation error:', err);
+        setError(`Failed to generate schedule: ${err.message || err.toString()}`);
+      }
     } finally {
       setLoading(false);
+      setOperationType(null);
+      abortControllerRef.current = null;
     }
   };
 
-
-  const deleteAllSchedules = async () => {
-    // Show school year selection dialog instead of deleting all
-    setShowDeleteSchoolYearDialog(true);
-  };
 
   const stopOperation = () => {
     if (window.confirm('Are you sure you want to cancel this operation?')) {
@@ -1799,6 +1663,11 @@ const AutoSchedule = () => {
       
       console.log('🛑 Operation stopped - UI updated');
     }
+  };
+
+  const deleteAllSchedules = async () => {
+    // Show school year selection dialog instead of deleting all
+    setShowDeleteSchoolYearDialog(true);
   };
 
   const handleDeleteSchedulesBySchoolYear = async () => {
@@ -1873,7 +1742,6 @@ const AutoSchedule = () => {
 
         try {
           console.log(`🗑️ Attempting to delete schedule:`, schedule);
-          // Note: scheduleAPI.delete may need to support abort signal in the future
           await scheduleAPI.delete(schedule.id);
           
           // Check if deletion was aborted
@@ -1915,7 +1783,7 @@ const AutoSchedule = () => {
       
       // Clear local state if we deleted schedules for the currently selected school year
       if (deleteSelectedSchoolYear === selectedSchoolYear) {
-        setGeneratedSchedules([]);
+      setGeneratedSchedules([]);
         setFailedSchedules([]);
       }
       
@@ -1937,10 +1805,8 @@ const AutoSchedule = () => {
         setError('Failed to delete schedules: ' + error.message);
       }
     } finally {
-      // Always reset loading state
       setLoading(false);
       setOperationType(null);
-      // Reset abort controller
       abortControllerRef.current = null;
     }
   };
@@ -1989,7 +1855,14 @@ const AutoSchedule = () => {
         <AutoAwesomeIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
         Auto Schedule Generator
       </Typography>
-
+      <Typography variant="body1" color="textSecondary" sx={{ mb: 3 }}>
+        Generate a conflict-free schedule for all sections, teachers, and classrooms.
+        Each section will be scheduled for the full duration (hours per week) of their selected subjects.
+        For example, if Mathematics requires 3 hours per week, the section will get 3 separate time slots for Mathematics.
+        Teachers will be matched to subjects based on their subject expertise.
+        Schedules are evenly distributed across all days of the week and time slots for optimal balance.
+        Generated schedules will be automatically saved to the database.
+      </Typography>
 
 
       {/* Statistics Cards */}
@@ -2020,7 +1893,7 @@ const AutoSchedule = () => {
                 <Typography variant="h6">Teachers</Typography>
               </Box>
               <Typography variant="h4" color="secondary">
-                {teachers.length}
+                {getTeacherUsers().length}
               </Typography>
             </CardContent>
           </Card>
@@ -2151,15 +2024,44 @@ const AutoSchedule = () => {
 
       {/* Action Buttons */}
       <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
-        <Button
-          variant="contained"
-          size="large"
-          startIcon={<AutoAwesomeIcon />}
-          onClick={generateSchedule}
-          disabled={loading || !selectedSemester || filteredSections.length === 0 || teachers.length === 0 || classrooms.length === 0 || subjects.length === 0}
-        >
-          Generate Schedule
-        </Button>
+        {!loading || operationType !== 'generating' ? (
+          <Button
+            variant="contained"
+            size="large"
+            startIcon={<AutoAwesomeIcon />}
+            onClick={generateSchedule}
+            disabled={loading || !selectedSemester || filteredSections.length === 0 || getTeacherUsers().length === 0 || classrooms.length === 0 || subjects.length === 0}
+          >
+            Generate Schedule
+          </Button>
+        ) : (
+          <>
+            <Button
+              variant="contained"
+              size="large"
+              disabled
+              startIcon={<AutoAwesomeIcon />}
+            >
+              Generating Schedule...
+            </Button>
+            <Button
+              variant="contained"
+              color="error"
+              size="large"
+              startIcon={<StopIcon />}
+              onClick={stopOperation}
+              sx={{ 
+                backgroundColor: 'error.main',
+                color: 'white',
+                '&:hover': {
+                  backgroundColor: 'error.dark',
+                }
+              }}
+            >
+              Stop Operation
+            </Button>
+          </>
+        )}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <Typography variant="body2" fontWeight="medium">
             School Year:
@@ -2847,8 +2749,22 @@ const AutoSchedule = () => {
         </Card>
       )}
 
-    
-
+      {/* Debug Display - Remove this after testing */}
+      <Card sx={{ mb: 2, bgcolor: 'grey.100' }}>
+        <CardContent>
+          <Typography variant="body2" component="div">
+            <strong>Debug Info:</strong> Failed Schedules Count: {failedSchedules.length}
+            {failedSchedules.length > 0 && (
+              <Box sx={{ mt: 1 }}>
+                <strong>Failed Schedules:</strong>
+                <Box component="pre" sx={{ mt: 1, p: 1, bgcolor: 'grey.200', borderRadius: 1, overflow: 'auto' }}>
+                  {JSON.stringify(failedSchedules, null, 2)}
+                </Box>
+              </Box>
+            )}
+          </Typography>
+        </CardContent>
+      </Card>
 
       {/* Failed Schedules Table */}
       {failedSchedules.length > 0 && (
@@ -3072,6 +2988,8 @@ const AutoSchedule = () => {
               <Typography variant="body2" color="textSecondary" sx={{ textAlign: 'center' }}>
                 {operationType === 'deleting' 
                   ? 'Deleting schedules. Click "Stop Operation" to cancel...'
+                  : operationType === 'generating'
+                  ? 'Generating schedules. Click "Stop Operation" to cancel...'
                   : 'Processing...'}
               </Typography>
             </Box>
@@ -3089,6 +3007,7 @@ const AutoSchedule = () => {
               onChange={(e) => setDeleteSelectedSchoolYear(e.target.value)}
               displayEmpty
               fullWidth
+              disabled={loading}
             >
               <MenuItem value="">
                 <em>Select School Year</em>
@@ -3127,27 +3046,27 @@ const AutoSchedule = () => {
           ) : (
             <>
               <Button
-              variant="contained"
-              disabled
-              startIcon={<DeleteIcon />}
-            >
-              {operationType === 'deleting' ? 'Deleting Schedules...' : 'Processing...'}
-            </Button>
-            <Button
-              variant="contained"
-              color="error"
-              startIcon={<StopIcon />}
-              onClick={stopOperation}
-              sx={{ 
-                backgroundColor: 'error.main',
-                color: 'white',
-                '&:hover': {
-                  backgroundColor: 'error.dark',
-                }
-              }}
-            >
-              Stop Operation
-            </Button>
+                variant="contained"
+                disabled
+                startIcon={<DeleteIcon />}
+              >
+                {operationType === 'deleting' ? 'Deleting Schedules...' : 'Processing...'}
+              </Button>
+              <Button
+                variant="contained"
+                color="error"
+                startIcon={<StopIcon />}
+                onClick={stopOperation}
+                sx={{ 
+                  backgroundColor: 'error.main',
+                  color: 'white',
+                  '&:hover': {
+                    backgroundColor: 'error.dark',
+                  }
+                }}
+              >
+                Stop Operation
+              </Button>
             </>
           )}
         </DialogActions>
