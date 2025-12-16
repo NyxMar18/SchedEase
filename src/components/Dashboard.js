@@ -8,41 +8,94 @@ import {
   Chip,
   LinearProgress,
   Alert,
-  Collapse,
 } from '@mui/material';
 import {
   School as SchoolIcon,
   Person as PersonIcon,
   Schedule as ScheduleIcon,
-  ExpandMore as ExpandMoreIcon,
-  ExpandLess as ExpandLessIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { classroomAPI, teacherAPI, scheduleAPI } from '../services/api';
-import { sectionAPI } from '../firebase/sectionService';
-import { subjectAPI } from '../firebase/subjectService';
-import { userAPI } from '../services/userService';
 import FirebaseConfigChecker from './FirebaseConfigChecker';
 
-const StatCard = ({ title, value, icon, color = 'primary' }) => (
-  <Card>
-    <CardContent>
-      <Box display="flex" alignItems="center" justifyContent="space-between">
-        <Box>
-          <Typography color="textSecondary" gutterBottom variant="h6">
-            {title}
-          </Typography>
-          <Typography variant="h4" component="div">
-            {value}
-          </Typography>
+const StatCard = ({ title, value, icon, color = 'primary' }) => {
+  const colorMap = {
+    primary: { main: '#1976d2', light: '#1976d215', gradient: 'linear-gradient(135deg, #1976d215 0%, #1976d205 100%)' },
+    secondary: { main: '#dc004e', light: '#dc004e15', gradient: 'linear-gradient(135deg, #dc004e15 0%, #dc004e05 100%)' },
+    success: { main: '#2e7d32', light: '#2e7d3215', gradient: 'linear-gradient(135deg, #2e7d3215 0%, #2e7d3205 100%)' },
+  };
+  
+  const colors = colorMap[color] || colorMap.primary;
+
+  return (
+    <Card
+      sx={{
+        height: '100%',
+        background: colors.gradient,
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        borderLeft: `4px solid ${colors.main}`,
+        '&:hover': {
+          transform: 'translateY(-8px)',
+          boxShadow: 6,
+          borderLeftWidth: '6px',
+        },
+      }}
+    >
+      <CardContent sx={{ p: 3, '&:last-child': { pb: 3 } }}>
+        <Box display="flex" alignItems="center" justifyContent="space-between">
+          <Box>
+            <Typography
+              color="textSecondary"
+              gutterBottom
+              variant="h6"
+              sx={{
+                fontWeight: 500,
+                fontSize: '0.875rem',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+                mb: 1.5,
+              }}
+            >
+              {title}
+            </Typography>
+            <Typography
+              variant="h3"
+              component="div"
+              sx={{
+                fontWeight: 700,
+                color: colors.main,
+                lineHeight: 1.2,
+              }}
+            >
+              {value}
+            </Typography>
+          </Box>
+          <Box
+            sx={{
+              color: colors.main,
+              p: 2.5,
+              borderRadius: 2,
+              bgcolor: colors.light,
+              transition: 'all 0.3s ease-in-out',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              '&:hover': {
+                transform: 'scale(1.15) rotate(5deg)',
+                bgcolor: `${colors.main}25`,
+              },
+              '& svg': {
+                fontSize: 48,
+              },
+            }}
+          >
+            {icon}
+          </Box>
         </Box>
-        <Box color={`${color}.main`}>
-          {icon}
-        </Box>
-      </Box>
-    </CardContent>
-  </Card>
-);
+      </CardContent>
+    </Card>
+  );
+};
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -53,126 +106,100 @@ const Dashboard = () => {
     loading: true,
     error: null,
   });
-  const [schedules, setSchedules] = useState([]);
-  const [sections, setSections] = useState([]);
-  const [subjects, setSubjects] = useState([]);
-  const [classrooms, setClassrooms] = useState([]);
-  const [teachers, setTeachers] = useState([]);
-  const [users, setUsers] = useState([]);
-  
-  // Collapsible sections state
-  const [expandedSections, setExpandedSections] = useState({
-    scheduleDistribution: true,
-    scheduleSummary: false,
-    classroomUtilization: false,
-    teacherWorkload: false,
-  });
-
-  // Toggle section collapse
-  const toggleSection = (sectionName) => {
-    setExpandedSections(prev => ({
-      ...prev,
-      [sectionName]: !prev[sectionName]
-    }));
-  };
-
-  // Time slots for distribution display
-  const timeSlots = [
-    { name: 'Session 1', start: '07:30', end: '09:00' },
-    { name: 'Session 2', start: '09:15', end: '10:45' },
-    { name: 'Session 3', start: '10:45', end: '12:15' },
-    { name: 'Session 4', start: '13:15', end: '14:45' },
-    { name: 'Session 5', start: '14:45', end: '16:15' },
-    { name: 'Session 6', start: '16:30', end: '18:00' },
-  ];
 
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const [classroomsRes, teachersRes, schedulesRes, sectionsRes, subjectsRes, usersRes] = await Promise.all([
+        const [classroomsRes, teachersRes, schedulesRes] = await Promise.all([
           classroomAPI.getAll(),
           teacherAPI.getAll(),
           scheduleAPI.getAll(),
-          sectionAPI.getAll(),
-          subjectAPI.getAll(),
-          userAPI.getAll(),
         ]);
 
         setStats({
-          totalClassrooms: classroomsRes.data?.length || 0,
-          totalTeachers: teachersRes.data?.length || 0,
-          totalSchedules: schedulesRes.data?.length || 0,
+          totalClassrooms: classroomsRes.data.length,
+          totalTeachers: teachersRes.data.length,
+          totalSchedules: schedulesRes.data.length,
           loading: false,
           error: null,
         });
-        
-        setSchedules(schedulesRes.data || []);
-        setSections(sectionsRes.data || []);
-        setSubjects(subjectsRes.data || []);
-        setClassrooms(classroomsRes.data || []);
-        setTeachers(teachersRes.data || []);
-        setUsers(usersRes.success ? (usersRes.data || []) : []);
       } catch (error) {
-        console.error('Dashboard fetch error:', error);
         setStats(prev => ({
           ...prev,
           loading: false,
-          error: `Failed to fetch dashboard data: ${error.message || error.toString()}`,
+          error: 'Failed to fetch dashboard data',
         }));
-        // Set empty arrays on error to prevent crashes
-        setSchedules([]);
-        setSections([]);
-        setSubjects([]);
-        setClassrooms([]);
-        setTeachers([]);
-        setUsers([]);
       }
     };
 
     fetchStats();
   }, []);
-  
-  // Helper function to get teacher users
-  const getTeacherUsers = () => {
-    return users.filter(user => user.role === 'teacher');
-  };
-  
-  // Helper function to get teacher data for a user
-  const getTeacherDataForUser = (user) => {
-    return teachers.find(teacher => 
-      teacher.id === user.id || 
-      teacher.email === user.email ||
-      (teacher.firstName === user.firstName && teacher.lastName === user.lastName)
-    );
-  };
 
   if (stats.loading) {
     return (
-      <Box>
-        <Typography variant="h4" gutterBottom>
+      <Box sx={{ p: 3 }}>
+        <Typography
+          variant="h4"
+          gutterBottom
+          sx={{
+            fontWeight: 700,
+            background: 'linear-gradient(135deg, #1976d2 0%, #dc004e 100%)',
+            backgroundClip: 'text',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            mb: 3,
+          }}
+        >
           Dashboard
         </Typography>
-        <LinearProgress />
+        <LinearProgress sx={{ height: 6, borderRadius: 3 }} />
       </Box>
     );
   }
 
   if (stats.error) {
     return (
-      <Box>
-        <Typography variant="h4" gutterBottom>
+      <Box sx={{ p: 3 }}>
+        <Typography
+          variant="h4"
+          gutterBottom
+          sx={{
+            fontWeight: 700,
+            background: 'linear-gradient(135deg, #1976d2 0%, #dc004e 100%)',
+            backgroundClip: 'text',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            mb: 3,
+          }}
+        >
           Dashboard
         </Typography>
-        <Alert severity="error">{stats.error}</Alert>
+        <Alert severity="error" sx={{ borderRadius: 2 }}>{stats.error}</Alert>
       </Box>
     );
   }
 
   return (
-    <Box>
-      <Typography variant="h4" gutterBottom>
-        Dashboard
-      </Typography>
+    <Box sx={{ p: { xs: 2, sm: 3 }, pb: 4 }}>
+      <Box sx={{ mb: 4 }}>
+        <Typography
+          variant="h4"
+          gutterBottom
+          sx={{
+            fontWeight: 700,
+            background: 'linear-gradient(135deg, #1976d2 0%, #dc004e 100%)',
+            backgroundClip: 'text',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            mb: 1,
+          }}
+        >
+          Dashboard
+        </Typography>
+        <Typography variant="body1" color="text.secondary" sx={{ fontSize: '1rem' }}>
+          Welcome to your scheduling management center
+        </Typography>
+      </Box>
 
 
       <Grid container spacing={3} sx={{ mt: 2 }}>
@@ -180,7 +207,7 @@ const Dashboard = () => {
           <StatCard
             title="Total Classrooms"
             value={stats.totalClassrooms}
-            icon={<SchoolIcon sx={{ fontSize: 40 }} />}
+            icon={<SchoolIcon />}
             color="primary"
           />
         </Grid>
@@ -188,7 +215,7 @@ const Dashboard = () => {
           <StatCard
             title="Total Teachers"
             value={stats.totalTeachers}
-            icon={<PersonIcon sx={{ fontSize: 40 }} />}
+            icon={<PersonIcon />}
             color="secondary"
           />
         </Grid>
@@ -196,68 +223,256 @@ const Dashboard = () => {
           <StatCard
             title="Total Schedules"
             value={stats.totalSchedules}
-            icon={<ScheduleIcon sx={{ fontSize: 40 }} />}
+            icon={<ScheduleIcon />}
             color="success"
           />
         </Grid>
 
       </Grid>
 
-      <Grid container spacing={3} sx={{ mt: 2 }}>
+      <Grid container spacing={3}>
         <Grid item xs={12} md={6}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
+          <Card
+            sx={{
+              height: '100%',
+              transition: 'all 0.3s ease-in-out',
+              '&:hover': {
+                boxShadow: 4,
+              },
+            }}
+          >
+            <CardContent sx={{ p: 3 }}>
+              <Typography
+                variant="h6"
+                gutterBottom
+                sx={{
+                  fontWeight: 600,
+                  mb: 2.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                }}
+              >
+                <ScheduleIcon sx={{ fontSize: 24, color: 'primary.main' }} />
                 Quick Actions
               </Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 2 }}>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5 }}>
                 <Chip
                   label="Add Classroom"
                   color="primary"
                   variant="outlined"
                   onClick={() => navigate('/classrooms')}
+                  sx={{
+                    fontSize: '0.875rem',
+                    fontWeight: 500,
+                    py: 2.5,
+                    borderWidth: 2,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease-in-out',
+                    '&:hover': {
+                      bgcolor: 'primary.main',
+                      color: 'white',
+                      transform: 'translateY(-2px)',
+                      boxShadow: 2,
+                    },
+                  }}
                 />
                 <Chip
                   label="Add Teacher"
                   color="secondary"
                   variant="outlined"
                   onClick={() => navigate('/teachers')}
+                  sx={{
+                    fontSize: '0.875rem',
+                    fontWeight: 500,
+                    py: 2.5,
+                    borderWidth: 2,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease-in-out',
+                    '&:hover': {
+                      bgcolor: 'secondary.main',
+                      color: 'white',
+                      transform: 'translateY(-2px)',
+                      boxShadow: 2,
+                    },
+                  }}
                 />
                 <Chip
                   label="Generate Schedule"
                   color="success"
                   variant="outlined"
                   onClick={() => navigate('/auto-schedule')}
+                  sx={{
+                    fontSize: '0.875rem',
+                    fontWeight: 500,
+                    py: 2.5,
+                    borderWidth: 2,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease-in-out',
+                    '&:hover': {
+                      bgcolor: 'success.main',
+                      color: 'white',
+                      transform: 'translateY(-2px)',
+                      boxShadow: 2,
+                    },
+                  }}
                 />
                 <Chip
                   label="View Schedules"
                   color="info"
                   variant="outlined"
                   onClick={() => navigate('/schedule-viewer')}
+                  sx={{
+                    fontSize: '0.875rem',
+                    fontWeight: 500,
+                    py: 2.5,
+                    borderWidth: 2,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease-in-out',
+                    '&:hover': {
+                      bgcolor: 'info.main',
+                      color: 'white',
+                      transform: 'translateY(-2px)',
+                      boxShadow: 2,
+                    },
+                  }}
                 />
-
+                <Chip
+                  label="Add Sections"
+                  color="warning"
+                  variant="outlined"
+                  onClick={() => navigate('/sections')}
+                  sx={{
+                    fontSize: '0.875rem',
+                    fontWeight: 500,
+                    py: 2.5,
+                    borderWidth: 2,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease-in-out',
+                    '&:hover': {
+                      bgcolor: 'warning.main',
+                      color: 'white',
+                      transform: 'translateY(-2px)',
+                      boxShadow: 2,
+                    },
+                  }}
+                />
               </Box>
             </CardContent>
           </Card>
         </Grid>
         <Grid item xs={12} md={6}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
+          <Card
+            sx={{
+              height: '100%',
+              background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
+              transition: 'all 0.3s ease-in-out',
+              '&:hover': {
+                boxShadow: 4,
+              },
+            }}
+          >
+            <CardContent sx={{ p: 3 }}>
+              <Typography
+                variant="h6"
+                gutterBottom
+                sx={{
+                  fontWeight: 600,
+                  mb: 2.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                }}
+              >
+                <Box
+                  component="span"
+                  sx={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    bgcolor: 'success.main',
+                    animation: 'pulse 2s infinite',
+                    '@keyframes pulse': {
+                      '0%, 100%': { opacity: 1 },
+                      '50%': { opacity: 0.5 },
+                    },
+                  }}
+                />
                 System Status
               </Typography>
-              <Box sx={{ mt: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="body2">Database Connection</Typography>
-                  <Chip label="Connected" color="success" size="small" />
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                <Box
+                  sx={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    p: 2,
+                    borderRadius: 2,
+                    bgcolor: 'rgba(46, 125, 50, 0.08)',
+                    transition: 'all 0.2s ease-in-out',
+                    '&:hover': {
+                      bgcolor: 'rgba(46, 125, 50, 0.12)',
+                      transform: 'translateX(4px)',
+                    },
+                  }}
+                >
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                    Database Connection
+                  </Typography>
+                  <Chip
+                    label="Connected"
+                    color="success"
+                    size="small"
+                    sx={{ fontWeight: 600 }}
+                  />
                 </Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Typography variant="body2">Scheduling Engine</Typography>
-                  <Chip label="Ready" color="success" size="small" />
+                <Box
+                  sx={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    p: 2,
+                    borderRadius: 2,
+                    bgcolor: 'rgba(46, 125, 50, 0.08)',
+                    transition: 'all 0.2s ease-in-out',
+                    '&:hover': {
+                      bgcolor: 'rgba(46, 125, 50, 0.12)',
+                      transform: 'translateX(4px)',
+                    },
+                  }}
+                >
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                    Scheduling Engine
+                  </Typography>
+                  <Chip
+                    label="Ready"
+                    color="success"
+                    size="small"
+                    sx={{ fontWeight: 600 }}
+                  />
                 </Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Typography variant="body2">Last Sync</Typography>
-                  <Typography variant="body2" color="textSecondary">
+                <Box
+                  sx={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    p: 2,
+                    borderRadius: 2,
+                    bgcolor: 'rgba(25, 118, 210, 0.08)',
+                    transition: 'all 0.2s ease-in-out',
+                    '&:hover': {
+                      bgcolor: 'rgba(25, 118, 210, 0.12)',
+                      transform: 'translateX(4px)',
+                    },
+                  }}
+                >
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                    Last Sync
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{ fontWeight: 500, color: 'primary.main' }}
+                  >
                     {new Date().toLocaleString()}
                   </Typography>
                 </Box>
@@ -269,360 +484,6 @@ const Dashboard = () => {
           <FirebaseConfigChecker />
         </Grid>
       </Grid>
-
-      {/* Schedule Distribution Dashboard */}
-      {schedules.length > 0 && (
-        <Card sx={{ mb: 3, borderRadius: 3, boxShadow: 3, mt: 3 }}>
-          <CardContent sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-              <ScheduleIcon sx={{ mr: 2, color: 'primary.main', fontSize: 28 }} />
-              <Typography variant="h5" fontWeight="bold" color="primary.main">
-                Schedule Distribution Overview
-              </Typography>
-            </Box>
-            
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              📊 Visual breakdown of how your schedules are distributed across days and time slots
-            </Typography>
-
-            <Grid container spacing={3}>
-              {/* Days Distribution */}
-              <Grid item xs={12} md={6}>
-                <Box sx={{ 
-                  borderRadius: 2, 
-                  p: 2.5, 
-                  height: '100%',
-                  border: '1px solid',
-                  borderColor: 'grey.200'
-                }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                    <Typography variant="h6" fontWeight="bold" color="primary.main">
-                      📅 Days Distribution
-                    </Typography>
-                    <Typography variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
-                      Classes per day
-                    </Typography>
-                  </Box>
-                  
-                  {Object.entries({ MONDAY: 0, TUESDAY: 0, WEDNESDAY: 0, THURSDAY: 0, FRIDAY: 0 }).map(([day, _]) => {
-                    const count = schedules.filter(s => s.dayOfWeek === day).length;
-                    const percentage = schedules.length > 0 ? Math.round((count / schedules.length) * 100) : 0;
-                    const maxCount = Math.max(...Object.values({ MONDAY: 0, TUESDAY: 0, WEDNESDAY: 0, THURSDAY: 0, FRIDAY: 0 }).map((_, index) => 
-                      schedules.filter(s => s.dayOfWeek === Object.keys({ MONDAY: 0, TUESDAY: 0, WEDNESDAY: 0, THURSDAY: 0, FRIDAY: 0 })[index]).length
-                    ));
-                    
-                    return (
-                      <Box key={day} sx={{ mb: 2 }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                          <Typography variant="body2" fontWeight="medium" color="text.primary">
-                            {day.charAt(0) + day.slice(1).toLowerCase()}
-                          </Typography>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Typography variant="caption" color="text.secondary">
-                              {percentage}%
-                            </Typography>
-                            <Chip 
-                              label={count} 
-                              size="small" 
-                              sx={{ 
-                                bgcolor: count > 0 ? 'primary.main' : 'grey.300',
-                                color: count > 0 ? 'white' : 'grey.600',
-                                fontWeight: 'bold',
-                                minWidth: '40px'
-                              }} 
-                            />
-                          </Box>
-                        </Box>
-                        
-                        {/* Progress Bar */}
-                        <Box sx={{ 
-                          width: '100%', 
-                          height: 6, 
-                          bgcolor: 'grey.200', 
-                          borderRadius: 3,
-                          overflow: 'hidden'
-                        }}>
-                          <Box sx={{ 
-                            width: `${maxCount > 0 ? (count / maxCount) * 100 : 0}%`, 
-                            height: '100%', 
-                            bgcolor: count > 0 ? 'primary.main' : 'grey.300',
-                            borderRadius: 3,
-                            transition: 'width 0.3s ease'
-                          }} />
-                        </Box>
-                      </Box>
-                    );
-                  })}
-                </Box>
-              </Grid>
-
-              {/* Time Distribution */}
-              <Grid item xs={12} md={6}>
-                <Box sx={{ 
-                  borderRadius: 2, 
-                  p: 2.5, 
-                  height: '100%',
-                  border: '1px solid',
-                  borderColor: 'grey.200'
-                }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                    <Typography variant="h6" fontWeight="bold" color="secondary.main">
-                      ⏰ Time Distribution
-                    </Typography>
-                    <Typography variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
-                      Classes per time slot
-                    </Typography>
-                  </Box>
-                  
-                  <Box sx={{ maxHeight: 300, overflowY: 'auto', pr: 1 }}>
-                    {timeSlots.map((timeSlot, slotIndex) => {
-                      const count = schedules.filter(s => s.startTime === timeSlot.start).length;
-                      const percentage = schedules.length > 0 ? Math.round((count / schedules.length) * 100) : 0;
-                      const maxCount = Math.max(...timeSlots.map(slot => 
-                        schedules.filter(s => s.startTime === slot.start).length
-                      ));
-                      
-                      return (
-                        <Box key={`time-slot-${timeSlot.start}-${timeSlot.end}-${slotIndex}`} sx={{ mb: 2 }}>
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                            <Typography variant="body2" fontWeight="medium" color="text.primary">
-                              {timeSlot.start}-{timeSlot.end}
-                            </Typography>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <Typography variant="caption" color="text.secondary">
-                                {percentage}%
-                              </Typography>
-                              <Chip 
-                                label={count} 
-                                size="small" 
-                                sx={{ 
-                                  bgcolor: count > 0 ? 'secondary.main' : 'grey.300',
-                                  color: count > 0 ? 'white' : 'grey.600',
-                                  fontWeight: 'bold',
-                                  minWidth: '40px'
-                                }} 
-                              />
-                            </Box>
-                          </Box>
-                          
-                          {/* Progress Bar */}
-                          <Box sx={{ 
-                            width: '100%', 
-                            height: 6, 
-                            bgcolor: 'grey.200', 
-                            borderRadius: 3,
-                            overflow: 'hidden'
-                          }}>
-                            <Box sx={{ 
-                              width: `${maxCount > 0 ? (count / maxCount) * 100 : 0}%`, 
-                              height: '100%', 
-                              bgcolor: count > 0 ? 'secondary.main' : 'grey.300',
-                              borderRadius: 3,
-                              transition: 'width 0.3s ease'
-                            }} />
-                          </Box>
-                        </Box>
-                      );
-                    })}
-                  </Box>
-                </Box>
-              </Grid>
-            </Grid>
-
-            {/* Summary Statistics */}
-            <Box sx={{ 
-              mt: 3, 
-              p: 2, 
-              borderRadius: 2,
-              border: '1px solid',
-              borderColor: 'grey.200'
-            }}>
-              <Typography variant="subtitle2" fontWeight="bold" sx={{ mb: 1, color: 'text.primary' }}>
-                📈 Quick Stats
-              </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={6} sm={3}>
-                  <Box sx={{ textAlign: 'center' }}>
-                    <Typography variant="h6" fontWeight="bold" color="primary.main">
-                      {schedules.length}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Total Classes
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={6} sm={3}>
-                  <Box sx={{ textAlign: 'center' }}>
-                    <Typography variant="h6" fontWeight="bold" color="secondary.main">
-                      {new Set(schedules.map(s => s.dayOfWeek)).size}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Active Days
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={6} sm={3}>
-                  <Box sx={{ textAlign: 'center' }}>
-                    <Typography variant="h6" fontWeight="bold" color="success.main">
-                      {new Set(schedules.map(s => s.startTime)).size}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Time Slots Used
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={6} sm={3}>
-                  <Box sx={{ textAlign: 'center' }}>
-                    <Typography variant="h6" fontWeight="bold" color="warning.main">
-                      {Math.round(schedules.length / 5)}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Avg/Day
-                    </Typography>
-                  </Box>
-                </Grid>
-              </Grid>
-            </Box>
-          </CardContent>
-        </Card>
-      )}
-
-    
-
-      {/* Classroom Utilization */}
-      {schedules.length > 0 && classrooms.length > 0 && (
-        <Card sx={{ mb: 3 }}>
-          <CardContent>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => toggleSection('classroomUtilization')}>
-              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', mb: 0 }}>
-                <SchoolIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-                Classroom Utilization
-              </Typography>
-              {expandedSections.classroomUtilization ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-            </Box>
-          </CardContent>
-          <Collapse in={expandedSections.classroomUtilization}>
-            <CardContent sx={{ pt: 0 }}>
-              <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-                Shows how schedules are distributed across all available classrooms for optimal resource usage.
-              </Typography>
-              <Grid container spacing={2}>
-                {classrooms.map(classroom => {
-                  const usageCount = schedules.filter(s => 
-                    s.classroom?.id === classroom.id || 
-                    s.classroom === classroom.id ||
-                    s.classroom?.roomName === classroom.roomName
-                  ).length;
-                  const totalCapacity = classroom.capacity || 0;
-                  const utilizationPercent = totalCapacity > 0 ? Math.round((usageCount / totalCapacity) * 15) : 0;
-                  
-                  return (
-                    <Grid item xs={12} sm={6} md={4} key={classroom.id}>
-                      <Card variant="outlined">
-                        <CardContent>
-                          <Typography variant="subtitle1" fontWeight="medium">
-                            {classroom.roomName}
-                          </Typography>
-                          <Typography variant="body2" color="textSecondary">
-                            Type: {classroom.roomType || 'N/A'}
-                          </Typography>
-                          <Typography variant="body2" color="textSecondary">
-                            Capacity: {totalCapacity} students
-                          </Typography>
-                          <Box sx={{ mt: 2 }}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                              <Typography variant="body2">Usage:</Typography>
-                              <Typography variant="body2" fontWeight="medium">
-                                {usageCount} schedules
-                              </Typography>
-                            </Box>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                              <Typography variant="body2">Utilization:</Typography>
-                              <Chip 
-                                label={`${utilizationPercent}%`} 
-                                size="small" 
-                                color={utilizationPercent > 80 ? 'success' : utilizationPercent > 50 ? 'warning' : 'info'}
-                              />
-                            </Box>
-                          </Box>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  );
-                })}
-              </Grid>
-            </CardContent>
-          </Collapse>
-        </Card>
-      )}
-
-      {/* Teacher Workload Distribution */}
-      {schedules.length > 0 && teachers.length > 0 && (
-        <Card sx={{ mb: 3 }}>
-          <CardContent>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => toggleSection('teacherWorkload')}>
-              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', mb: 0 }}>
-                <PersonIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-                Teacher Workload Distribution
-              </Typography>
-              {expandedSections.teacherWorkload ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-            </Box>
-          </CardContent>
-          <Collapse in={expandedSections.teacherWorkload}>
-            <CardContent sx={{ pt: 0 }}>
-              <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-                Shows how schedules are distributed across all teachers for balanced workload.
-              </Typography>
-              <Grid container spacing={2}>
-                {teachers.map(teacher => {
-                  const scheduleCount = schedules.filter(s => {
-                    const scheduleTeacherId = s.teacher?.id || s.teacher;
-                    return scheduleTeacherId === teacher.id;
-                  }).length;
-                  
-                  const teacherSubjects = teacher.subjects || [];
-                  const maxPossibleLoad = teacherSubjects.length * 108; // Assuming 3 hours per subject
-                  const workloadPercent = maxPossibleLoad > 0 ? Math.round((scheduleCount / maxPossibleLoad) * 100) : 0;
-                  
-                  return (
-                    <Grid item xs={12} sm={6} md={4} key={teacher.id}>
-                      <Card variant="outlined">
-                        <CardContent>
-                          <Typography variant="subtitle1" fontWeight="medium">
-                            {teacher.firstName} {teacher.lastName}
-                          </Typography>
-                          <Typography variant="body2" color="textSecondary">
-                            Subject: {teacherSubjects.length > 0 ? teacherSubjects.join(', ') : 'N/A'}
-                          </Typography>
-                          <Typography variant="body2" color="textSecondary">
-                            Max Possible Load: {maxPossibleLoad} hours/week
-                          </Typography>
-                          <Box sx={{ mt: 2 }}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                              <Typography variant="body2">Current Load:</Typography>
-                              <Typography variant="body2" fontWeight="medium">
-                                {scheduleCount} schedules
-                              </Typography>
-                            </Box>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                              <Typography variant="body2">Workload:</Typography>
-                              <Chip 
-                                label={`${workloadPercent}%`} 
-                                size="small" 
-                                color={workloadPercent > 80 ? 'success' : workloadPercent > 50 ? 'warning' : 'info'}
-                              />
-                            </Box>
-                          </Box>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  );
-                })}
-              </Grid>
-            </CardContent>
-          </Collapse>
-        </Card>
-      )}
     </Box>
   );
 };

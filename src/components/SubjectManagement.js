@@ -3,12 +3,6 @@ import {
   Box,
   Typography,
   Button,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Paper,
   IconButton,
   Dialog,
@@ -29,12 +23,15 @@ import {
   MenuItem,
   Checkbox,
   ListItemText,
+  Collapse,
 } from '@mui/material';
 import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
   Book as BookIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
 } from '@mui/icons-material';
 import { subjectAPI } from '../firebase/subjectService';
 
@@ -55,6 +52,20 @@ const SubjectManagement = () => {
     combineRoomTypes: false, // Combine multiple room types into one session
     gradeLevel: '', // Grade 11 or Grade 12
   });
+  const [expandedCards, setExpandedCards] = useState(new Set());
+  const [categoryFilter, setCategoryFilter] = useState('');
+
+  const toggleCard = (id) => {
+    setExpandedCards(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
 
   const categories = [
     'Core',
@@ -256,6 +267,35 @@ const SubjectManagement = () => {
         </Button>
       </Box>
 
+      {/* Category Filter */}
+      <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
+        <FormControl sx={{ minWidth: 200 }}>
+          <InputLabel>Filter by Category</InputLabel>
+          <Select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            label="Filter by Category"
+          >
+            <MenuItem value="">
+              <em>All Categories</em>
+            </MenuItem>
+            {categories.map((category) => (
+              <MenuItem key={category} value={category}>
+                {category}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        {categoryFilter && (
+          <Chip
+            label={`Showing: ${categoryFilter}`}
+            onDelete={() => setCategoryFilter('')}
+            color="primary"
+            variant="outlined"
+          />
+        )}
+      </Box>
+
       {/* Statistics Cards */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={6} md={3}>
@@ -311,85 +351,244 @@ const SubjectManagement = () => {
 
       {loading ? (
         <Typography>Loading...</Typography>
-      ) : (
-        <TableContainer component={Paper}>
-          <Table>
-            <TableHead>
-                <TableRow>
-                  <TableCell>Subject Name</TableCell>
-                  <TableCell>Code</TableCell>
-                  <TableCell>Category</TableCell>
-                  <TableCell>Grade Level</TableCell>
-                  <TableCell>Required Room</TableCell>
-                  <TableCell>Duration/Week</TableCell>
-                  <TableCell>Actions</TableCell>
-                </TableRow>
-            </TableHead>
-            <TableBody>
-              {subjects.map((subject) => (
-                <TableRow key={subject.id}>
-                  <TableCell>
-                    <Typography variant="subtitle1" fontWeight="bold">
-                      {subject.name}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Chip label={subject.code} color="primary" size="small" />
-                  </TableCell>
-                  <TableCell>
-                    {getCategoryChip(subject.category)}
-                  </TableCell>
-                  <TableCell>
-                    <Chip label={subject.gradeLevel || 'N/A'} color="secondary" size="small" />
-                  </TableCell>
-                  <TableCell>
-                    {(() => {
-                      // Handle backward compatibility
-                      let roomTypes = [];
-                      if (subject.requiredRoomTypes && Array.isArray(subject.requiredRoomTypes)) {
-                        if (subject.requiredRoomTypes.length > 0 && typeof subject.requiredRoomTypes[0] === 'object') {
-                          roomTypes = subject.requiredRoomTypes;
-                        } else {
-                          // Old format: array of strings
-                          roomTypes = subject.requiredRoomTypes.map(type => ({ type, duration: null }));
-                        }
-                      } else if (subject.requiredRoomType) {
-                        roomTypes = [{ type: subject.requiredRoomType, duration: subject.durationPerWeek }];
-                      }
-                      
-                      if (roomTypes.length === 0) {
-                        return <Chip label="Any" color="info" size="small" />;
-                      }
-                      
-                      return (
-                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                          {roomTypes.map((rt, idx) => (
-                            <Chip 
-                              key={idx} 
-                              label={rt.duration ? `${rt.type} (${rt.duration}h)` : rt.type} 
-                              color="info" 
-                              size="small" 
-                            />
-                          ))}
-                        </Box>
-                      );
-                    })()}
-                  </TableCell>
-                  <TableCell>{subject.durationPerWeek || '-'} hours</TableCell>
-                  <TableCell>
-                    <IconButton onClick={() => handleOpen(subject)}>
-                      <EditIcon />
-                    </IconButton>
-                    <IconButton onClick={() => handleDelete(subject.id)} color="error">
-                      <DeleteIcon />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      )}
+      ) : (() => {
+        // Filter subjects by category
+        const filteredSubjects = categoryFilter
+          ? subjects.filter(subject => subject.category === categoryFilter)
+          : subjects;
+
+        return filteredSubjects.length === 0 ? (
+          <Paper sx={{ p: 4, textAlign: 'center' }}>
+            <Typography variant="h6" color="textSecondary">
+              {categoryFilter
+                ? `No ${categoryFilter} subjects found.`
+                : 'No subjects found. Click "Add Subject" to get started.'}
+            </Typography>
+          </Paper>
+        ) : (
+          <Grid container spacing={2}>
+            {filteredSubjects.map((subject) => {
+            const isExpanded = expandedCards.has(subject.id);
+            // Handle backward compatibility for room types
+            let roomTypes = [];
+            if (subject.requiredRoomTypes && Array.isArray(subject.requiredRoomTypes)) {
+              if (subject.requiredRoomTypes.length > 0 && typeof subject.requiredRoomTypes[0] === 'object') {
+                roomTypes = subject.requiredRoomTypes;
+              } else {
+                roomTypes = subject.requiredRoomTypes.map(type => ({ type, duration: null }));
+              }
+            } else if (subject.requiredRoomType) {
+              roomTypes = [{ type: subject.requiredRoomType, duration: subject.durationPerWeek }];
+            }
+            
+            return (
+              <Grid item xs={12} sm={6} md={4} lg={3} key={subject.id}>
+                <Card
+                  sx={{
+                    transition: 'all 0.3s ease-in-out',
+                    borderLeft: '4px solid',
+                    borderLeftColor: subject.category === 'Core' ? 'primary.main' : subject.category === 'Applied' ? 'success.main' : 'info.main',
+                    cursor: 'pointer',
+                    '&:hover': {
+                      transform: 'translateY(-2px)',
+                      boxShadow: 4,
+                    },
+                  }}
+                  onClick={() => toggleCard(subject.id)}
+                >
+                  <CardContent
+                    sx={{
+                      p: 2,
+                      '&:last-child': { pb: isExpanded ? 2 : 2 },
+                    }}
+                  >
+                    {/* Collapsed view - just subject name */}
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Box sx={{ flex: 1 }}>
+                        <Typography
+                          variant="h6"
+                          component="div"
+                          sx={{
+                            fontWeight: 600,
+                            color: 'primary.main',
+                          }}
+                        >
+                          {subject.name}
+                        </Typography>
+                        <Typography variant="caption" color="textSecondary" sx={{ mt: 0.5, display: 'block' }}>
+                          {subject.code}
+                        </Typography>
+                      </Box>
+                      <IconButton
+                        size="small"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleCard(subject.id);
+                        }}
+                        sx={{ ml: 1 }}
+                      >
+                        {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                      </IconButton>
+                    </Box>
+
+                    {/* Expanded view - all details */}
+                    <Collapse in={isExpanded} timeout="auto">
+                      <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+                        <Grid container spacing={2}>
+                          <Grid item xs={12}>
+                            <Box>
+                              <Typography
+                                variant="caption"
+                                color="textSecondary"
+                                sx={{
+                                  textTransform: 'uppercase',
+                                  fontWeight: 600,
+                                  letterSpacing: 0.5,
+                                  fontSize: '0.7rem',
+                                }}
+                              >
+                                Category
+                              </Typography>
+                              <Box sx={{ mt: 0.5 }}>
+                                {getCategoryChip(subject.category)}
+                              </Box>
+                            </Box>
+                          </Grid>
+                          <Grid item xs={12}>
+                            <Box>
+                              <Typography
+                                variant="caption"
+                                color="textSecondary"
+                                sx={{
+                                  textTransform: 'uppercase',
+                                  fontWeight: 600,
+                                  letterSpacing: 0.5,
+                                  fontSize: '0.7rem',
+                                }}
+                              >
+                                Grade Level
+                              </Typography>
+                              <Box sx={{ mt: 0.5 }}>
+                                <Chip
+                                  label={subject.gradeLevel || 'N/A'}
+                                  color="secondary"
+                                  size="small"
+                                  sx={{ fontWeight: 500 }}
+                                />
+                              </Box>
+                            </Box>
+                          </Grid>
+                          <Grid item xs={12}>
+                            <Box>
+                              <Typography
+                                variant="caption"
+                                color="textSecondary"
+                                sx={{
+                                  textTransform: 'uppercase',
+                                  fontWeight: 600,
+                                  letterSpacing: 0.5,
+                                  fontSize: '0.7rem',
+                                }}
+                              >
+                                Required Room Types
+                              </Typography>
+                              <Box sx={{ mt: 0.5, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                {roomTypes.length === 0 ? (
+                                  <Chip label="Any" color="info" size="small" />
+                                ) : (
+                                  roomTypes.map((rt, idx) => (
+                                    <Chip
+                                      key={idx}
+                                      label={rt.duration ? `${rt.type} (${rt.duration}h)` : rt.type}
+                                      color="info"
+                                      size="small"
+                                    />
+                                  ))
+                                )}
+                              </Box>
+                            </Box>
+                          </Grid>
+                          <Grid item xs={12}>
+                            <Box>
+                              <Typography
+                                variant="caption"
+                                color="textSecondary"
+                                sx={{
+                                  textTransform: 'uppercase',
+                                  fontWeight: 600,
+                                  letterSpacing: 0.5,
+                                  fontSize: '0.7rem',
+                                }}
+                              >
+                                Duration Per Week
+                              </Typography>
+                              <Typography variant="body2" fontWeight={500} sx={{ mt: 0.5 }}>
+                                {subject.durationPerWeek || '-'} hours
+                              </Typography>
+                            </Box>
+                          </Grid>
+                          {subject.description && (
+                            <Grid item xs={12}>
+                              <Box>
+                                <Typography
+                                  variant="caption"
+                                  color="textSecondary"
+                                  sx={{
+                                    textTransform: 'uppercase',
+                                    fontWeight: 600,
+                                    letterSpacing: 0.5,
+                                    fontSize: '0.7rem',
+                                  }}
+                                >
+                                  Description
+                                </Typography>
+                                <Typography variant="body2" sx={{ mt: 0.5 }}>
+                                  {subject.description}
+                                </Typography>
+                              </Box>
+                            </Grid>
+                          )}
+                          <Grid item xs={12}>
+                            <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                startIcon={<EditIcon />}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpen(subject);
+                                }}
+                                color="primary"
+                                fullWidth
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                startIcon={<DeleteIcon />}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDelete(subject.id);
+                                }}
+                                color="error"
+                                fullWidth
+                              >
+                                Delete
+                              </Button>
+                            </Box>
+                          </Grid>
+                        </Grid>
+                      </Box>
+                    </Collapse>
+                  </CardContent>
+                </Card>
+              </Grid>
+            );
+            })}
+          </Grid>
+        );
+      })()}
 
       <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
         <DialogTitle>

@@ -1,14 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Typography,
   Button,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Paper,
   IconButton,
   Dialog,
@@ -27,12 +21,17 @@ import {
   FormGroup,
   FormControlLabel,
   Checkbox,
+  Card,
+  CardContent,
+  Collapse,
 } from '@mui/material';
 import {
   Add as AddIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
   Person as PersonIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
 } from '@mui/icons-material';
 import { teacherAPI } from '../services/api';
 import { subjectAPI } from '../firebase/subjectService';
@@ -60,8 +59,69 @@ const TeacherManagement = () => {
     availableDays: [],
     notes: '',
   });
+  const [expandedCards, setExpandedCards] = useState(new Set());
+  const [subjectCategoryFilter, setSubjectCategoryFilter] = useState('');
+  const [subjectsDropdownOpen, setSubjectsDropdownOpen] = useState(false);
+  const [sectionSemesterFilter, setSectionSemesterFilter] = useState('');
+  const [sectionGradeLevelFilter, setSectionGradeLevelFilter] = useState('');
+  const [sectionsDropdownOpen, setSectionsDropdownOpen] = useState(false);
+
+  const toggleCard = (id) => {
+    setExpandedCards(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
 
   const daysOfWeek = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+  const subjectCategories = ['Core', 'Applied', 'Specialized'];
+  const gradeLevels = ['Grade 11', 'Grade 12'];
+  const semesters = ['Semester 1', 'Semester 2'];
+
+  // Filter subjects by category for better UX in subject selection
+  const filteredSubjects = useMemo(() => {
+    if (!subjectCategoryFilter) {
+      return subjects;
+    }
+    return subjects.filter(subject => subject.category === subjectCategoryFilter);
+  }, [subjects, subjectCategoryFilter]);
+
+  // Filter sections by semester and grade level for better UX
+  const filteredSections = useMemo(() => {
+    let filtered = sections;
+    
+    if (sectionSemesterFilter) {
+      filtered = filtered.filter(section => section.semester === sectionSemesterFilter);
+    }
+    
+    if (sectionGradeLevelFilter) {
+      filtered = filtered.filter(section => section.gradeLevel === sectionGradeLevelFilter);
+    }
+    
+    return filtered;
+  }, [sections, sectionSemesterFilter, sectionGradeLevelFilter]);
+
+  // Sort teachers alphabetically by last name, then first name
+  const sortedTeachers = useMemo(() => {
+    return [...teachers].sort((a, b) => {
+      const aLastName = (a.lastName || '').toLowerCase();
+      const bLastName = (b.lastName || '').toLowerCase();
+      const aFirstName = (a.firstName || '').toLowerCase();
+      const bFirstName = (b.firstName || '').toLowerCase();
+      
+      // First compare by last name
+      if (aLastName !== bLastName) {
+        return aLastName.localeCompare(bLastName);
+      }
+      // If last names are the same, compare by first name
+      return aFirstName.localeCompare(bFirstName);
+    });
+  }, [teachers]);
 
   useEffect(() => {
     fetchData();
@@ -120,6 +180,9 @@ const TeacherManagement = () => {
   const handleClose = () => {
     setOpen(false);
     setEditingTeacher(null);
+    setSubjectCategoryFilter('');
+    setSectionSemesterFilter('');
+    setSectionGradeLevelFilter('');
     setFormData({
       firstName: '',
       lastName: '',
@@ -271,73 +334,232 @@ const TeacherManagement = () => {
 
         {loading ? (
           <Typography>Loading...</Typography>
+        ) : sortedTeachers.length === 0 ? (
+          <Paper sx={{ p: 4, textAlign: 'center' }}>
+            <Typography variant="h6" color="textSecondary">
+              No teachers found. Click "Add Teacher" to get started.
+            </Typography>
+          </Paper>
         ) : (
-          <TableContainer component={Paper}>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Name</TableCell>
-                  <TableCell>Email</TableCell>
-                  <TableCell>Subjects</TableCell>
-                  <TableCell>Assigned Sections</TableCell>
-                  <TableCell>Available Days</TableCell>
-                  <TableCell>Available Time</TableCell>
-                  <TableCell>Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {teachers.map((teacher) => (
-                  <TableRow key={teacher.id}>
-                    <TableCell>{teacher.firstName} {teacher.lastName}</TableCell>
-                    <TableCell>{teacher.email}</TableCell>
-                    <TableCell>
-                      {teacher.subjects && teacher.subjects.length > 0 ? (
-                        teacher.subjects.map(subject => (
-                          <Chip key={subject} label={subject} color="secondary" size="small" sx={{ mr: 0.5, mb: 0.5 }} />
-                        ))
-                      ) : (
-                        <Chip label={teacher.subject || 'N/A'} color="secondary" size="small" />
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {teacher.assignedSections && teacher.assignedSections.length > 0 ? (
-                        teacher.assignedSections.map(sectionId => {
-                          const section = sections.find(s => s.id === sectionId);
-                          return section ? (
-                            <Chip 
-                              key={sectionId} 
-                              label={`${section.sectionName}${section.semester ? ` (${section.semester})` : ''}`} 
-                              color="primary" 
-                              size="small" 
-                              sx={{ mr: 0.5, mb: 0.5 }} 
-                            />
-                          ) : null;
-                        })
-                      ) : (
-                        <Typography variant="body2" color="textSecondary">None</Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {teacher.availableDays?.map(day => (
-                        <Chip key={day} label={day} size="small" sx={{ mr: 0.5, mb: 0.5 }} />
-                      ))}
-                    </TableCell>
-                    <TableCell>
-                      {teacher.availableStartTime} - {teacher.availableEndTime}
-                    </TableCell>
-                    <TableCell>
-                      <IconButton onClick={() => handleOpen(teacher)}>
-                        <EditIcon />
-                      </IconButton>
-                      <IconButton onClick={() => handleDelete(teacher.id)} color="error">
-                        <DeleteIcon />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
+          <Grid container spacing={2}>
+            {sortedTeachers.map((teacher) => {
+              const isExpanded = expandedCards.has(teacher.id);
+              return (
+                <Grid item xs={12} sm={6} md={4} lg={3} key={teacher.id}>
+                  <Card
+                    sx={{
+                      transition: 'all 0.3s ease-in-out',
+                      borderLeft: '4px solid',
+                      borderLeftColor: 'secondary.main',
+                      cursor: 'pointer',
+                      '&:hover': {
+                        transform: 'translateY(-2px)',
+                        boxShadow: 4,
+                      },
+                    }}
+                    onClick={() => toggleCard(teacher.id)}
+                  >
+                    <CardContent
+                      sx={{
+                        p: 2,
+                        '&:last-child': { pb: isExpanded ? 2 : 2 },
+                      }}
+                    >
+                      {/* Collapsed view - just teacher name */}
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Box sx={{ flex: 1 }}>
+                          <Typography
+                            variant="h6"
+                            component="div"
+                            sx={{
+                              fontWeight: 600,
+                              color: 'secondary.main',
+                            }}
+                          >
+                            {teacher.firstName} {teacher.lastName}
+                          </Typography>
+                          <Typography variant="caption" color="textSecondary" sx={{ mt: 0.5, display: 'block' }}>
+                            {teacher.email}
+                          </Typography>
+                        </Box>
+                        <IconButton
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleCard(teacher.id);
+                          }}
+                          sx={{ ml: 1 }}
+                        >
+                          {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                        </IconButton>
+                      </Box>
+
+                      {/* Expanded view - all details */}
+                      <Collapse in={isExpanded} timeout="auto">
+                        <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+                          <Grid container spacing={2}>
+                            <Grid item xs={12}>
+                              <Box>
+                                <Typography
+                                  variant="caption"
+                                  color="textSecondary"
+                                  sx={{
+                                    textTransform: 'uppercase',
+                                    fontWeight: 600,
+                                    letterSpacing: 0.5,
+                                    fontSize: '0.7rem',
+                                  }}
+                                >
+                                  Subjects
+                                </Typography>
+                                <Box sx={{ mt: 0.5, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                  {teacher.subjects && teacher.subjects.length > 0 ? (
+                                    teacher.subjects.map(subject => (
+                                      <Chip key={subject} label={subject} color="secondary" size="small" />
+                                    ))
+                                  ) : (
+                                    <Chip label={teacher.subject || 'N/A'} color="secondary" size="small" />
+                                  )}
+                                </Box>
+                              </Box>
+                            </Grid>
+                            <Grid item xs={12}>
+                              <Box>
+                                <Typography
+                                  variant="caption"
+                                  color="textSecondary"
+                                  sx={{
+                                    textTransform: 'uppercase',
+                                    fontWeight: 600,
+                                    letterSpacing: 0.5,
+                                    fontSize: '0.7rem',
+                                  }}
+                                >
+                                  Assigned Sections
+                                </Typography>
+                                <Box sx={{ mt: 0.5, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                  {teacher.assignedSections && teacher.assignedSections.length > 0 ? (
+                                    teacher.assignedSections.map(sectionId => {
+                                      const section = sections.find(s => s.id === sectionId);
+                                      return section ? (
+                                        <Chip
+                                          key={sectionId}
+                                          label={`${section.sectionName}${section.semester ? ` (${section.semester})` : ''}`}
+                                          color="primary"
+                                          size="small"
+                                        />
+                                      ) : null;
+                                    })
+                                  ) : (
+                                    <Typography variant="body2" color="textSecondary">None</Typography>
+                                  )}
+                                </Box>
+                              </Box>
+                            </Grid>
+                            <Grid item xs={12}>
+                              <Box>
+                                <Typography
+                                  variant="caption"
+                                  color="textSecondary"
+                                  sx={{
+                                    textTransform: 'uppercase',
+                                    fontWeight: 600,
+                                    letterSpacing: 0.5,
+                                    fontSize: '0.7rem',
+                                  }}
+                                >
+                                  Available Days
+                                </Typography>
+                                <Box sx={{ mt: 0.5, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                  {teacher.availableDays && teacher.availableDays.length > 0 ? (
+                                    teacher.availableDays.map(day => (
+                                      <Chip key={day} label={day} size="small" />
+                                    ))
+                                  ) : (
+                                    <Typography variant="body2" color="textSecondary">Not specified</Typography>
+                                  )}
+                                </Box>
+                              </Box>
+                            </Grid>
+                            <Grid item xs={12}>
+                              <Box>
+                                <Typography
+                                  variant="caption"
+                                  color="textSecondary"
+                                  sx={{
+                                    textTransform: 'uppercase',
+                                    fontWeight: 600,
+                                    letterSpacing: 0.5,
+                                    fontSize: '0.7rem',
+                                  }}
+                                >
+                                  Available Time
+                                </Typography>
+                                <Typography variant="body2" fontWeight={500} sx={{ mt: 0.5 }}>
+                                  {teacher.availableStartTime} - {teacher.availableEndTime}
+                                </Typography>
+                              </Box>
+                            </Grid>
+                            {teacher.notes && (
+                              <Grid item xs={12}>
+                                <Box>
+                                  <Typography
+                                    variant="caption"
+                                    color="textSecondary"
+                                    sx={{
+                                      textTransform: 'uppercase',
+                                      fontWeight: 600,
+                                      letterSpacing: 0.5,
+                                      fontSize: '0.7rem',
+                                    }}
+                                  >
+                                    Notes
+                                  </Typography>
+                                  <Typography variant="body2" sx={{ mt: 0.5 }}>
+                                    {teacher.notes}
+                                  </Typography>
+                                </Box>
+                              </Grid>
+                            )}
+                            <Grid item xs={12}>
+                              <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                                <Button
+                                  variant="outlined"
+                                  size="small"
+                                  startIcon={<EditIcon />}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpen(teacher);
+                                  }}
+                                  color="primary"
+                                  fullWidth
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  variant="outlined"
+                                  size="small"
+                                  startIcon={<DeleteIcon />}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDelete(teacher.id);
+                                  }}
+                                  color="error"
+                                  fullWidth
+                                >
+                                  Delete
+                                </Button>
+                              </Box>
+                            </Grid>
+                          </Grid>
+                        </Box>
+                      </Collapse>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              );
+            })}
+          </Grid>
         )}
 
         <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
@@ -382,6 +604,12 @@ const TeacherManagement = () => {
                     value={formData.subjects}
                     onChange={handleChange('subjects')}
                     label="Subjects"
+                    onOpen={() => setSubjectsDropdownOpen(true)}
+                    onClose={() => {
+                      setSubjectsDropdownOpen(false);
+                      // Reset filter when closing dropdown
+                      setSubjectCategoryFilter('');
+                    }}
                     renderValue={(selected) => (
                       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                         {selected.map((value) => (
@@ -389,15 +617,78 @@ const TeacherManagement = () => {
                         ))}
                       </Box>
                     )}
+                    MenuProps={{
+                      PaperProps: {
+                        style: {
+                          maxHeight: 400,
+                        },
+                      },
+                    }}
                   >
-                    {subjects.map((subject) => (
-                      <MenuItem 
-                        key={subject.id} 
-                        value={subject.name}
-                      >
-                        {subject.name} ({subject.code})
+                    <Box 
+                      component="div"
+                      sx={{ 
+                        p: 1.5, 
+                        borderBottom: '1px solid', 
+                        borderColor: 'divider', 
+                        bgcolor: 'background.paper',
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 1
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      <FormControl fullWidth size="small">
+                        <InputLabel>Filter by Category</InputLabel>
+                        <Select
+                          value={subjectCategoryFilter}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            setSubjectCategoryFilter(e.target.value);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          label="Filter by Category"
+                        >
+                          <MenuItem value="">
+                            <em>All Categories</em>
+                          </MenuItem>
+                          {subjectCategories.map((category) => (
+                            <MenuItem key={category} value={category}>
+                              {category}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                    </Box>
+                    {filteredSubjects.length === 0 ? (
+                      <MenuItem disabled>
+                        <Typography variant="body2" color="textSecondary">
+                          No subjects found in this category
+                        </Typography>
                       </MenuItem>
-                    ))}
+                    ) : (
+                      filteredSubjects.map((subject) => (
+                        <MenuItem 
+                          key={subject.id} 
+                          value={subject.name}
+                        >
+                          {subject.name} ({subject.code})
+                          {subject.category && (
+                            <Chip 
+                              label={subject.category} 
+                              size="small" 
+                              sx={{ ml: 1, height: 20 }} 
+                              color={
+                                subject.category === 'Core' ? 'primary' :
+                                subject.category === 'Applied' ? 'success' : 'info'
+                              }
+                            />
+                          )}
+                        </MenuItem>
+                      ))
+                    )}
                   </Select>
                 </FormControl>
                 {formData.subjects.length === 0 && (
@@ -414,6 +705,13 @@ const TeacherManagement = () => {
                     value={formData.assignedSections}
                     onChange={handleChange('assignedSections')}
                     label="Assigned Sections"
+                    onOpen={() => setSectionsDropdownOpen(true)}
+                    onClose={() => {
+                      setSectionsDropdownOpen(false);
+                      // Reset filters when closing dropdown
+                      setSectionSemesterFilter('');
+                      setSectionGradeLevelFilter('');
+                    }}
                     renderValue={(selected) => (
                       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                         {selected.map((sectionId) => {
@@ -428,15 +726,112 @@ const TeacherManagement = () => {
                         })}
                       </Box>
                     )}
+                    MenuProps={{
+                      PaperProps: {
+                        style: {
+                          maxHeight: 400,
+                        },
+                      },
+                    }}
                   >
-                    {sections.map((section) => (
-                      <MenuItem 
-                        key={section.id} 
-                        value={section.id}
-                      >
-                        {section.sectionName} {section.gradeLevel && `(${section.gradeLevel})`} {section.semester && `- ${section.semester}`}
+                    {/* Filter section inside dropdown */}
+                    <Box 
+                      component="div"
+                      sx={{ 
+                        p: 1.5, 
+                        borderBottom: '1px solid', 
+                        borderColor: 'divider', 
+                        bgcolor: 'background.paper',
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 1
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      <Grid container spacing={1}>
+                        <Grid item xs={6}>
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Filter by Grade Level</InputLabel>
+                            <Select
+                              value={sectionGradeLevelFilter}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                setSectionGradeLevelFilter(e.target.value);
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              label="Filter by Grade Level"
+                            >
+                              <MenuItem value="">
+                                <em>All Grade Levels</em>
+                              </MenuItem>
+                              {gradeLevels.map((level) => (
+                                <MenuItem key={level} value={level}>
+                                  {level}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                        <Grid item xs={6}>
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Filter by Semester</InputLabel>
+                            <Select
+                              value={sectionSemesterFilter}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                setSectionSemesterFilter(e.target.value);
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              label="Filter by Semester"
+                            >
+                              <MenuItem value="">
+                                <em>All Semesters</em>
+                              </MenuItem>
+                              {semesters.map((semester) => (
+                                <MenuItem key={semester} value={semester}>
+                                  {semester}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                      </Grid>
+                    </Box>
+                    {filteredSections.length === 0 ? (
+                      <MenuItem disabled>
+                        <Typography variant="body2" color="textSecondary">
+                          No sections found with the selected filters
+                        </Typography>
                       </MenuItem>
-                    ))}
+                    ) : (
+                      filteredSections.map((section) => (
+                        <MenuItem 
+                          key={section.id} 
+                          value={section.id}
+                        >
+                          {section.sectionName} 
+                          {section.gradeLevel && (
+                            <Chip 
+                              label={section.gradeLevel} 
+                              size="small" 
+                              sx={{ ml: 1, height: 20 }} 
+                              color="secondary"
+                            />
+                          )}
+                          {section.semester && (
+                            <Chip 
+                              label={section.semester} 
+                              size="small" 
+                              sx={{ ml: 1, height: 20 }} 
+                              color="info"
+                            />
+                          )}
+                        </MenuItem>
+                      ))
+                    )}
                   </Select>
                 </FormControl>
                 <Typography variant="caption" color="textSecondary" sx={{ mt: 0.5, display: 'block' }}>

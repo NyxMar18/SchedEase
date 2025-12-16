@@ -3,12 +3,6 @@ import {
   Box,
   Typography,
   Button,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Paper,
   IconButton,
   Dialog,
@@ -30,6 +24,7 @@ import {
   Menu,
   Card,
   CardContent,
+  Collapse,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -38,6 +33,8 @@ import {
   Group as GroupIcon,
   CalendarToday as CalendarTodayIcon,
   ArrowDropDown as ArrowDropDownIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { sectionAPI } from '../firebase/sectionService';
@@ -55,6 +52,7 @@ const SectionManagement = () => {
   const [editingSection, setEditingSection] = useState(null);
   const [scheduleMenuAnchor, setScheduleMenuAnchor] = useState(null);
   const [selectedSemesterFilter, setSelectedSemesterFilter] = useState('');
+  const [expandedCards, setExpandedCards] = useState(new Set());
   const [formData, setFormData] = useState({
     sectionName: '',
     track: '',
@@ -256,6 +254,18 @@ const SectionManagement = () => {
     return 'transparent';
   };
 
+  const toggleCard = (id) => {
+    setExpandedCards(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
   // Handle create schedule menu
   const handleCreateScheduleClick = (event) => {
     setScheduleMenuAnchor(event.currentTarget);
@@ -349,67 +359,221 @@ const SectionManagement = () => {
 
       {loading ? (
         <Typography>Loading...</Typography>
+      ) : filteredSections.length === 0 ? (
+        <Paper sx={{ p: 4, textAlign: 'center' }}>
+          <Typography variant="h6" color="textSecondary">
+            {selectedSemesterFilter 
+              ? `No sections found for ${selectedSemesterFilter}`
+              : 'No sections available. Click "Add Section" to get started.'}
+          </Typography>
+        </Paper>
       ) : (
-        <TableContainer component={Paper}>
-          <Table>
-            <TableHead>
-                <TableRow>
-                  <TableCell>Section Name</TableCell>
-                  <TableCell>Track</TableCell>
-                  <TableCell>Grade Level</TableCell>
-                  <TableCell>Semester</TableCell>
-                  <TableCell>Subjects</TableCell>
-                  <TableCell>Max Students</TableCell>
-                  <TableCell>Actions</TableCell>
-                </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredSections.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} align="center">
-                    <Typography variant="body2" color="textSecondary">
-                      {selectedSemesterFilter 
-                        ? `No sections found for ${selectedSemesterFilter}`
-                        : 'No sections available'}
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredSections.map((section) => (
-                  <TableRow key={section.id}>
-                    <TableCell>{section.sectionName}</TableCell>
-                    <TableCell>
-                      <Chip label={section.track} color="primary" size="small" />
-                    </TableCell>
-                    <TableCell>
-                      <Chip label={section.gradeLevel} color="secondary" size="small" />
-                    </TableCell>
-                    <TableCell>
-                      <Chip label={section.semester || 'N/A'} color="info" size="small" />
-                    </TableCell>
-                    <TableCell>
-                      {section.selectedSubjects?.map(subjectId => {
-                        const subject = subjects.find(s => s.id === subjectId);
-                        return subject ? (
-                          <Chip key={subjectId} label={subject.name} color="info" size="small" sx={{ mr: 0.5, mb: 0.5 }} />
-                        ) : null;
-                      }) || '-'}
-                    </TableCell>
-                    <TableCell>{section.maxStudents}</TableCell>
-                    <TableCell>
-                      <IconButton onClick={() => handleOpen(section)}>
-                        <EditIcon />
+        <Grid container spacing={2}>
+          {filteredSections.map((section) => {
+            const isExpanded = expandedCards.has(section.id);
+            return (
+              <Grid item xs={12} sm={6} md={4} lg={3} key={section.id}>
+                <Card
+                  sx={{
+                    transition: 'all 0.3s ease-in-out',
+                    borderLeft: '4px solid',
+                    borderLeftColor: 'primary.main',
+                    cursor: 'pointer',
+                    '&:hover': {
+                      transform: 'translateY(-2px)',
+                      boxShadow: 4,
+                    },
+                  }}
+                  onClick={() => toggleCard(section.id)}
+                >
+                  <CardContent
+                    sx={{
+                      p: 2,
+                      '&:last-child': { pb: isExpanded ? 2 : 2 },
+                    }}
+                  >
+                    {/* Collapsed view - just section name */}
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Typography
+                        variant="h6"
+                        component="div"
+                        sx={{
+                          fontWeight: 600,
+                          color: 'primary.main',
+                          flex: 1,
+                        }}
+                      >
+                        {section.sectionName}
+                      </Typography>
+                      <IconButton
+                        size="small"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleCard(section.id);
+                        }}
+                        sx={{ ml: 1 }}
+                      >
+                        {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                       </IconButton>
-                      <IconButton onClick={() => handleDelete(section.id)} color="error">
-                        <DeleteIcon />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
+                    </Box>
+
+                    {/* Expanded view - all details */}
+                    <Collapse in={isExpanded} timeout="auto">
+                      <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+                        <Grid container spacing={2}>
+                          <Grid item xs={12}>
+                            <Box>
+                              <Typography
+                                variant="caption"
+                                color="textSecondary"
+                                sx={{
+                                  textTransform: 'uppercase',
+                                  fontWeight: 600,
+                                  letterSpacing: 0.5,
+                                  fontSize: '0.7rem',
+                                }}
+                              >
+                                Track
+                              </Typography>
+                              <Box sx={{ mt: 0.5 }}>
+                                <Chip label={section.track} color="primary" size="small" sx={{ fontWeight: 500 }} />
+                              </Box>
+                            </Box>
+                          </Grid>
+                          <Grid item xs={12} sm={6}>
+                            <Box>
+                              <Typography
+                                variant="caption"
+                                color="textSecondary"
+                                sx={{
+                                  textTransform: 'uppercase',
+                                  fontWeight: 600,
+                                  letterSpacing: 0.5,
+                                  fontSize: '0.7rem',
+                                }}
+                              >
+                                Grade Level
+                              </Typography>
+                              <Box sx={{ mt: 0.5 }}>
+                                <Chip label={section.gradeLevel} color="secondary" size="small" sx={{ fontWeight: 500 }} />
+                              </Box>
+                            </Box>
+                          </Grid>
+                          <Grid item xs={12} sm={6}>
+                            <Box>
+                              <Typography
+                                variant="caption"
+                                color="textSecondary"
+                                sx={{
+                                  textTransform: 'uppercase',
+                                  fontWeight: 600,
+                                  letterSpacing: 0.5,
+                                  fontSize: '0.7rem',
+                                }}
+                              >
+                                Semester
+                              </Typography>
+                              <Box sx={{ mt: 0.5 }}>
+                                <Chip label={section.semester || 'N/A'} color="info" size="small" sx={{ fontWeight: 500 }} />
+                              </Box>
+                            </Box>
+                          </Grid>
+                          <Grid item xs={12}>
+                            <Box>
+                              <Typography
+                                variant="caption"
+                                color="textSecondary"
+                                sx={{
+                                  textTransform: 'uppercase',
+                                  fontWeight: 600,
+                                  letterSpacing: 0.5,
+                                  fontSize: '0.7rem',
+                                }}
+                              >
+                                Max Students
+                              </Typography>
+                              <Typography variant="body2" fontWeight={500} sx={{ mt: 0.5 }}>
+                                {section.maxStudents} students
+                              </Typography>
+                            </Box>
+                          </Grid>
+                          <Grid item xs={12}>
+                            <Box>
+                              <Typography
+                                variant="caption"
+                                color="textSecondary"
+                                sx={{
+                                  textTransform: 'uppercase',
+                                  fontWeight: 600,
+                                  letterSpacing: 0.5,
+                                  fontSize: '0.7rem',
+                                  mb: 0.5,
+                                  display: 'block',
+                                }}
+                              >
+                                Subjects
+                              </Typography>
+                              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                                {section.selectedSubjects && section.selectedSubjects.length > 0 ? (
+                                  section.selectedSubjects.map(subjectId => {
+                                    const subject = subjects.find(s => s.id === subjectId);
+                                    return subject ? (
+                                      <Chip 
+                                        key={subjectId} 
+                                        label={subject.name} 
+                                        color="info" 
+                                        size="small" 
+                                        sx={{ fontWeight: 500 }}
+                                      />
+                                    ) : null;
+                                  })
+                                ) : (
+                                  <Typography variant="body2" color="textSecondary" sx={{ fontStyle: 'italic' }}>
+                                    No subjects assigned
+                                  </Typography>
+                                )}
+                              </Box>
+                            </Box>
+                          </Grid>
+                          <Grid item xs={12}>
+                            <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                startIcon={<EditIcon />}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpen(section);
+                                }}
+                                color="primary"
+                                fullWidth
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                startIcon={<DeleteIcon />}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDelete(section.id);
+                                }}
+                                color="error"
+                                fullWidth
+                              >
+                                Delete
+                              </Button>
+                            </Box>
+                          </Grid>
+                        </Grid>
+                      </Box>
+                    </Collapse>
+                  </CardContent>
+                </Card>
+              </Grid>
+            );
+          })}
+        </Grid>
       )}
 
       <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
