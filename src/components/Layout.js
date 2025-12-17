@@ -47,7 +47,7 @@ const adminMenuItems = [
   { text: 'School Years', icon: <CalendarTodayIcon />, path: '/school-years' },
   { text: 'Auto Schedule', icon: <AutoAwesomeIcon />, path: '/auto-schedule' },
   { text: 'Schedule Viewer', icon: <VisibilityIcon />, path: '/schedule-viewer' },
-  { text: 'Firebase Test', icon: <AutoAwesomeIcon />, path: '/firebase-test' },
+  //{ text: 'Firebase Test', icon: <AutoAwesomeIcon />, path: '/firebase-test' },
 ];
 
 const teacherMenuItems = [
