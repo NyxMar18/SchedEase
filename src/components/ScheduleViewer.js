@@ -441,9 +441,11 @@ const ScheduleViewer = () => {
   }, [sections, gridSelectedSection]);
 
   useEffect(() => {
-    if (!gridSelectedTeacher && teachers.length > 0) {
+    // Don't auto-select first teacher if user is a teacher (let teacher-specific logic handle it)
+    if (!gridSelectedTeacher && teachers.length > 0 && !isTeacher()) {
       setGridSelectedTeacher(teachers[0].id);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teachers, gridSelectedTeacher]);
 
   useEffect(() => {
@@ -451,6 +453,53 @@ const ScheduleViewer = () => {
       setGridSelectedClassroom(classrooms[0].id);
     }
   }, [classrooms, gridSelectedClassroom]);
+
+  // Auto-set template view for teachers when they log in
+  useEffect(() => {
+    if (isTeacher() && user && teachers.length > 0) {
+      // Set view mode to template
+      setViewMode('template');
+      
+      // Set perspective to teacher
+      setGridPerspective('teacher');
+      
+      // Find and set the logged-in teacher's ID
+      const teacherId = user.teacherId || user.id;
+      const matchingTeacher = teachers.find(teacher => 
+        String(teacher.id) === String(teacherId) ||
+        String(teacher.id) === String(user.id) ||
+        (teacher.email && user.email && teacher.email === user.email)
+      );
+      
+      if (matchingTeacher) {
+        setGridSelectedTeacher(matchingTeacher.id);
+      } else if (teacherId) {
+        // If we have a teacherId but can't find the teacher yet, set it anyway
+        // It might be available after teachers load
+        setGridSelectedTeacher(String(teacherId));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, teachers]);
+
+  // Ensure admins have a selection when switching to template view
+  useEffect(() => {
+    if (isAdmin() && viewMode === 'template') {
+      // Default to section perspective for admins if not already set
+      if (gridPerspective === 'section' && !gridSelectedSection && sections.length > 0) {
+        setGridSelectedSection(sections[0].id);
+      }
+      // If perspective is teacher and no teacher is selected, select the first one
+      else if (gridPerspective === 'teacher' && !gridSelectedTeacher && teachers.length > 0) {
+        setGridSelectedTeacher(teachers[0].id);
+      }
+      // If perspective is classroom and no classroom is selected, select the first one
+      else if (gridPerspective === 'classroom' && !gridSelectedClassroom && classrooms.length > 0) {
+        setGridSelectedClassroom(classrooms[0].id);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, gridPerspective, sections, teachers, classrooms]);
 
   // Fetch school years from Firebase
   const fetchSchoolYears = async () => {
@@ -2221,8 +2270,8 @@ const ScheduleViewer = () => {
         </Box>
       ) : (
         /* Template View */
-        <Box>
-          <Card sx={{ mb: 3 }}>
+        <Box className="template-print-wrapper">
+          <Card sx={{ mb: 3, '@media print': { display: 'none' } }} className="template-print-hide">
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 Weekly Template View
@@ -2230,78 +2279,82 @@ const ScheduleViewer = () => {
               <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
                 View schedules in the fixed daily template (Subject → Break → 2 Subjects → Lunch → 2 Subjects → Break → Subject).
               </Typography>
-              <ButtonGroup sx={{ mb: 2 }}>
-                <Button
-                  variant={gridPerspective === 'section' ? 'contained' : 'outlined'}
-                  onClick={() => setGridPerspective('section')}
-                >
-                  By Section
-                </Button>
-                <Button
-                  variant={gridPerspective === 'teacher' ? 'contained' : 'outlined'}
-                  onClick={() => setGridPerspective('teacher')}
-                >
-                  By Teacher
-                </Button>
-                <Button
-                  variant={gridPerspective === 'classroom' ? 'contained' : 'outlined'}
-                  onClick={() => setGridPerspective('classroom')}
-                >
-                  By Room
-                </Button>
-              </ButtonGroup>
-              {gridPerspective === 'section' && (
-                <FormControl fullWidth sx={{ maxWidth: 320 }}>
-                  <InputLabel>Select Section</InputLabel>
-                  <Select
-                    value={gridSelectedSection}
-                    label="Select Section"
-                    onChange={(e) => setGridSelectedSection(e.target.value)}
-                  >
-                    {sections.map(section => (
-                      <MenuItem key={section.id} value={section.id}>
-                        {section.sectionName}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              )}
-              {gridPerspective === 'teacher' && (
-                <FormControl fullWidth sx={{ maxWidth: 320 }}>
-                  <InputLabel>Select Teacher</InputLabel>
-                  <Select
-                    value={gridSelectedTeacher}
-                    label="Select Teacher"
-                    onChange={(e) => setGridSelectedTeacher(e.target.value)}
-                  >
-                    {teachers.map(teacher => (
-                      <MenuItem key={teacher.id} value={teacher.id}>
-                        {teacher.firstName} {teacher.lastName}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              )}
-              {gridPerspective === 'classroom' && (
-                <FormControl fullWidth sx={{ maxWidth: 320 }}>
-                  <InputLabel>Select Room</InputLabel>
-                  <Select
-                    value={gridSelectedClassroom}
-                    label="Select Room"
-                    onChange={(e) => setGridSelectedClassroom(e.target.value)}
-                  >
-                    {classrooms.map(classroom => (
-                      <MenuItem key={classroom.id} value={classroom.id}>
-                        {classroom.roomName} ({classroom.roomType})
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+              {isAdmin() && (
+                <>
+                  <ButtonGroup sx={{ mb: 2 }}>
+                    <Button
+                      variant={gridPerspective === 'section' ? 'contained' : 'outlined'}
+                      onClick={() => setGridPerspective('section')}
+                    >
+                      By Section
+                    </Button>
+                    <Button
+                      variant={gridPerspective === 'teacher' ? 'contained' : 'outlined'}
+                      onClick={() => setGridPerspective('teacher')}
+                    >
+                      By Teacher
+                    </Button>
+                    <Button
+                      variant={gridPerspective === 'classroom' ? 'contained' : 'outlined'}
+                      onClick={() => setGridPerspective('classroom')}
+                    >
+                      By Room
+                    </Button>
+                  </ButtonGroup>
+                  {gridPerspective === 'section' && (
+                    <FormControl fullWidth sx={{ maxWidth: 320 }}>
+                      <InputLabel>Select Section</InputLabel>
+                      <Select
+                        value={gridSelectedSection}
+                        label="Select Section"
+                        onChange={(e) => setGridSelectedSection(e.target.value)}
+                      >
+                        {sections.map(section => (
+                          <MenuItem key={section.id} value={section.id}>
+                            {section.sectionName}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
+                  {gridPerspective === 'teacher' && (
+                    <FormControl fullWidth sx={{ maxWidth: 320 }}>
+                      <InputLabel>Select Teacher</InputLabel>
+                      <Select
+                        value={gridSelectedTeacher}
+                        label="Select Teacher"
+                        onChange={(e) => setGridSelectedTeacher(e.target.value)}
+                      >
+                        {teachers.map(teacher => (
+                          <MenuItem key={teacher.id} value={teacher.id}>
+                            {teacher.firstName} {teacher.lastName}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
+                  {gridPerspective === 'classroom' && (
+                    <FormControl fullWidth sx={{ maxWidth: 320 }}>
+                      <InputLabel>Select Room</InputLabel>
+                      <Select
+                        value={gridSelectedClassroom}
+                        label="Select Room"
+                        onChange={(e) => setGridSelectedClassroom(e.target.value)}
+                      >
+                        {classrooms.map(classroom => (
+                          <MenuItem key={classroom.id} value={classroom.id}>
+                            {classroom.roomName} ({classroom.roomType})
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
 
-          <TableContainer component={Paper}>
+          <TableContainer component={Paper} className="template-print-area">
             <Table>
               <TableHead>
                 <TableRow>
@@ -2340,13 +2393,47 @@ const ScheduleViewer = () => {
                         );
                       }
 
+                      // Check if this is a schedule (not FREE TIME) or a break/lunch
+                      const isSchedule = cell.primary && cell.primary !== 'FREE TIME';
+                      
                       return (
-                        <TableCell key={`${day}-${row.start}`} align="center">
-                          <Typography variant="body2" fontWeight="bold">
+                        <TableCell 
+                          key={`${day}-${row.start}`} 
+                          align="center"
+                          sx={{
+                            bgcolor: isSchedule ? 'rgba(25, 118, 210, 0.1)' : 'transparent',
+                            border: isSchedule ? '2px solid' : '1px solid',
+                            borderColor: isSchedule ? 'primary.main' : 'rgba(224, 224, 224, 0.5)',
+                            borderRadius: isSchedule ? 1.5 : 0,
+                            py: 1.5,
+                            position: 'relative',
+                            '&:hover': isSchedule ? {
+                              bgcolor: 'rgba(25, 118, 210, 0.15)',
+                              boxShadow: 2,
+                            } : {},
+                          }}
+                        >
+                          <Typography 
+                            variant="body2" 
+                            fontWeight="bold"
+                            sx={{
+                              color: isSchedule ? 'primary.dark' : 'text.secondary',
+                              fontSize: isSchedule ? '1rem' : '0.875rem',
+                              fontWeight: isSchedule ? 700 : 400,
+                            }}
+                          >
                             {cell.primary}
                           </Typography>
                           {cell.secondary && (
-                            <Typography variant="caption" color="textSecondary">
+                            <Typography 
+                              variant="caption" 
+                              sx={{
+                                color: isSchedule ? 'primary.main' : 'text.secondary',
+                                fontWeight: isSchedule ? 600 : 400,
+                                display: 'block',
+                                mt: 0.5,
+                              }}
+                            >
                               {cell.secondary}
                             </Typography>
                           )}
@@ -2862,14 +2949,36 @@ const ScheduleViewer = () => {
       {/* Print Styles */}
       <style jsx global>{`
         @media print {
+          body * {
+            visibility: hidden;
+          }
+          .template-print-area,
+          .template-print-area * {
+            visibility: visible;
+          }
+          .template-print-area {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+          }
           .MuiAppBar-root,
           .MuiDrawer-root,
           .MuiButton-root,
-          .MuiIconButton-root {
+          .MuiIconButton-root,
+          .MuiCard-root.template-print-hide {
             display: none !important;
           }
           .MuiTableContainer-root {
             box-shadow: none !important;
+            page-break-inside: avoid;
+          }
+          .MuiTable-root {
+            width: 100% !important;
+          }
+          @page {
+            margin: 1cm;
+            size: landscape;
           }
         }
       `}</style>
