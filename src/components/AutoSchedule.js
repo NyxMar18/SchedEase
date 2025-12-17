@@ -2748,24 +2748,6 @@ const AutoSchedule = () => {
           </CardContent>
         </Card>
       )}
-
-      {/* Debug Display - Remove this after testing */}
-      <Card sx={{ mb: 2, bgcolor: 'grey.100' }}>
-        <CardContent>
-          <Typography variant="body2" component="div">
-            <strong>Debug Info:</strong> Failed Schedules Count: {failedSchedules.length}
-            {failedSchedules.length > 0 && (
-              <Box sx={{ mt: 1 }}>
-                <strong>Failed Schedules:</strong>
-                <Box component="pre" sx={{ mt: 1, p: 1, bgcolor: 'grey.200', borderRadius: 1, overflow: 'auto' }}>
-                  {JSON.stringify(failedSchedules, null, 2)}
-                </Box>
-              </Box>
-            )}
-          </Typography>
-        </CardContent>
-      </Card>
-
       {/* Failed Schedules Table */}
       {failedSchedules.length > 0 && (
         <Card sx={{ mb: 3 }}>

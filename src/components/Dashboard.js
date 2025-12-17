@@ -12,6 +12,10 @@ import {
   Collapse,
   IconButton,
   Pagination,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import {
   School as SchoolIcon,
@@ -21,10 +25,14 @@ import {
   Room as RoomIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
+  FilterList as FilterListIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { classroomAPI, teacherAPI, scheduleAPI } from '../services/api';
+import { classroomAPI, teacherAPI, scheduleAPI, schoolYearAPI } from '../services/api';
 import FirebaseConfigChecker from './FirebaseConfigChecker';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, collection, getDocs, query, orderBy } from 'firebase/firestore';
+import firebaseConfig from '../firebase/config';
 
 const StatCard = ({ title, value, icon, color = 'primary' }) => (
   <Card>
@@ -84,6 +92,10 @@ const normalizeClassroomIdentifier = (classroom) => {
   return classroom.roomName || classroom.name || classroom.id || 'Unknown';
 };
 
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const [stats, setStats] = useState({
@@ -103,6 +115,8 @@ const Dashboard = () => {
     teacherUtilization: 1,
     classroomUtilization: 1,
   });
+  const [schoolYears, setSchoolYears] = useState([]);
+  const [selectedSchoolYear, setSelectedSchoolYear] = useState('');
 
   const itemsPerPage = 10;
 
@@ -120,18 +134,95 @@ const Dashboard = () => {
     }));
   };
 
+  const fetchSchoolYears = async () => {
+    try {
+      // Try Firestore first (as used in ScheduleViewer)
+      const schoolYearsRef = collection(db, 'schoolYears');
+      const q = query(schoolYearsRef, orderBy('name', 'desc'));
+      const querySnapshot = await getDocs(q);
+      const schoolYearsData = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setSchoolYears(schoolYearsData);
+      
+      // Set active school year as default if available
+      const activeSchoolYear = schoolYearsData.find(sy => sy.isActive);
+      if (activeSchoolYear) {
+        setSelectedSchoolYear(activeSchoolYear.id);
+      } else if (schoolYearsData.length > 0) {
+        // If no active, use the first one
+        setSelectedSchoolYear(schoolYearsData[0].id);
+      }
+    } catch (error) {
+      console.error('Error fetching school years:', error);
+      // Fallback to backend API
+      try {
+        const response = await schoolYearAPI.getAll();
+        const schoolYearsData = response.data.map(sy => ({
+          id: sy.id?.toString() || sy.id,
+          name: sy.name,
+          isActive: sy.isActive,
+        }));
+        setSchoolYears(schoolYearsData);
+        const activeSchoolYear = schoolYearsData.find(sy => sy.isActive);
+        if (activeSchoolYear) {
+          setSelectedSchoolYear(activeSchoolYear.id);
+        } else if (schoolYearsData.length > 0) {
+          setSelectedSchoolYear(schoolYearsData[0].id);
+        }
+      } catch (fallbackError) {
+        console.error('Error fetching school years from backend:', fallbackError);
+      }
+    }
+  };
+
+  useEffect(() => {
+    fetchSchoolYears();
+  }, []);
+
   useEffect(() => {
     const fetchStats = async () => {
+      if (!selectedSchoolYear) {
+        // Wait for school year to be selected
+        return;
+      }
+
       try {
+        setStats(prev => ({ ...prev, loading: true }));
+        
         const [classroomsRes, teachersRes, schedulesRes] = await Promise.all([
           classroomAPI.getAll(),
           teacherAPI.getAll(),
           scheduleAPI.getAll(),
         ]);
 
-        // Calculate teacher utilization
+        // Filter schedules by selected school year
+        const filteredSchedules = schedulesRes.data.filter(schedule => {
+          if (!selectedSchoolYear) return true;
+          // Handle both string ID and object ID formats
+          const scheduleYearId = schedule.schoolYearId || schedule.schoolYear?.id || schedule.schoolYear;
+          return scheduleYearId === selectedSchoolYear || scheduleYearId?.toString() === selectedSchoolYear?.toString();
+        });
+
+        // Get unique classrooms and teachers from filtered schedules
+        const uniqueClassroomIds = new Set();
+        const uniqueTeacherIds = new Set();
+        
+        filteredSchedules.forEach(schedule => {
+          if (schedule.classroom) {
+            const classroomId = schedule.classroom.id || schedule.classroom;
+            if (classroomId) uniqueClassroomIds.add(classroomId);
+          }
+          if (schedule.teacher) {
+            const teacherId = schedule.teacher.id || schedule.teacher;
+            if (teacherId) uniqueTeacherIds.add(teacherId);
+          }
+        });
+
+        // Calculate teacher utilization from filtered schedules
         const teacherUtilization = {};
-        schedulesRes.data.forEach(schedule => {
+        filteredSchedules.forEach(schedule => {
           if (schedule.startTime && schedule.endTime) {
             const hours = calculateHours(schedule.startTime, schedule.endTime);
             const teacherName = normalizeTeacherIdentifier(schedule.teacher);
@@ -139,9 +230,9 @@ const Dashboard = () => {
           }
         });
 
-        // Calculate classroom utilization
+        // Calculate classroom utilization from filtered schedules
         const classroomUtilization = {};
-        schedulesRes.data.forEach(schedule => {
+        filteredSchedules.forEach(schedule => {
           if (schedule.startTime && schedule.endTime) {
             const hours = calculateHours(schedule.startTime, schedule.endTime);
             const classroomName = normalizeClassroomIdentifier(schedule.classroom);
@@ -150,13 +241,19 @@ const Dashboard = () => {
         });
 
         setStats({
-          totalClassrooms: classroomsRes.data.length,
-          totalTeachers: teachersRes.data.length,
-          totalSchedules: schedulesRes.data.length,
+          totalClassrooms: uniqueClassroomIds.size,
+          totalTeachers: uniqueTeacherIds.size,
+          totalSchedules: filteredSchedules.length,
           teacherUtilization,
           classroomUtilization,
           loading: false,
           error: null,
+        });
+
+        // Reset pagination when data changes
+        setPagination({
+          teacherUtilization: 1,
+          classroomUtilization: 1,
         });
       } catch (error) {
         setStats(prev => ({
@@ -168,9 +265,9 @@ const Dashboard = () => {
     };
 
     fetchStats();
-  }, []);
+  }, [selectedSchoolYear]);
 
-  if (stats.loading) {
+  if (stats.loading || schoolYears.length === 0) {
     return (
       <Box>
         <Typography variant="h4" gutterBottom>
@@ -192,12 +289,51 @@ const Dashboard = () => {
     );
   }
 
+  if (!selectedSchoolYear && schoolYears.length > 0) {
+    return (
+      <Box>
+        <Typography variant="h4" gutterBottom>
+          Dashboard
+        </Typography>
+        <Alert severity="info">Please select a school year to view dashboard statistics.</Alert>
+      </Box>
+    );
+  }
+
   return (
     <Box>
-      <Typography variant="h4" gutterBottom>
-        Dashboard
-      </Typography>
-
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+        <Typography variant="h4">
+          Dashboard
+        </Typography>
+        <Box display="flex" alignItems="center" gap={1}>
+          <FilterListIcon color="action" />
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <InputLabel id="school-year-filter-label">School Year</InputLabel>
+            <Select
+              labelId="school-year-filter-label"
+              id="school-year-filter"
+              value={selectedSchoolYear}
+              label="School Year"
+              onChange={(e) => setSelectedSchoolYear(e.target.value)}
+            >
+            {schoolYears.map((schoolYear) => (
+              <MenuItem key={schoolYear.id} value={schoolYear.id}>
+                {schoolYear.name}
+                {schoolYear.isActive && (
+                  <Chip 
+                    label="Active" 
+                    size="small" 
+                    color="success" 
+                    sx={{ ml: 1, height: 20 }}
+                  />
+                )}
+              </MenuItem>
+            ))}
+            </Select>
+          </FormControl>
+        </Box>
+      </Box>
 
       <Grid container spacing={3} sx={{ mt: 2 }}>
         <Grid item xs={12} sm={6} md={3}>
